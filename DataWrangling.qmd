@@ -275,11 +275,10 @@ Check out the bins_taxonomy.csv table.
 
 Please do the following and put your code below.
 
-1.   Load that data in
+1.  Load that data in
 
-```{=html}
 <!-- -->
-```
+
 2)  Subset out only the taxonomy data from 5m.
 
 3)  Make a new column called `arisa_frag` which has complementary data to the `arisa_frag` column in the `arisa_fragments` data table we created earlier.

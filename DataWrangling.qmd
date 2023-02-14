@@ -11,6 +11,8 @@ editor: visual
 
 Welcome to the first lesson of the multivariate analysis in environmental science course. This lesson leverages a quarto workbook. You need the following things working on your computer (or some other computer) to use this workbook.
 
+You probably don't need to do these things if you are working in the class posit Cloud directory.
+
 1\) R. I'm using version 4.1.3.
 
 2\) Rstudio RStudio I'm using version 2022.07.2+576
@@ -39,7 +41,7 @@ Lets get down to business:
 
 I've already imported the data for today's lesson to the `Data` subdirectory folder of the DataWrangling project. Take a look at the files inside of it. You can probably open them directly in rstudio, or your favorite notepad program.
 
-They can also be downloaded from the internet directly. They are on BCO-DMO. They are also from my dissertation, btw. I am the wor
+They can also be downloaded from the internet directly. They are on BCO-DMO. They are also from my dissertation, btw.
 
 Data citaton:
 
@@ -58,13 +60,13 @@ env00 <- read_csv(here("Data", "arisa_latlon_sort_vess_phys.csv"), na = c("nd"))
 
 Take a look at env00 (`View(env00)` or click on it in the environment panel). Also run `glimpse(env00)`. Its kind of a mess. This is 100% the fault of graduate student Jacob Cram (back in 2014).
 
-**Question -1:** What does the column SSHD_Sat indicate? What are its units. Why do adjacent rows often have the same value for SSHD_Sat?
+**Question 1:** What does the column SSHD_Sat indicate? What are its units. Why do adjacent rows often have the same value for SSHD_Sat?
 
-**Question 0:** What is the purpose of the depth_n column. How is it different from the Depth column.
+**Question 2:** What is the purpose of the depth_n column. How is it different from the Depth column.
 
-Question 0.5: How are the columns to the right of depth_n different to the ones to the left of depth_n:
+**Question 3:** How are the columns to the right of depth_n different to the ones to the left of depth_n:
 
-Question: Why did I have to specify the arguement `na = c("nd")`. What happens if you run a similar function without that argument. How does the resulting data frame look different?
+**Question 4:** Why did I have to specify the arguement `na = c("nd")`. What happens if you run a similar function without that argument. How does the resulting data frame look different?
 
 \###
 
@@ -72,17 +74,17 @@ In this class we will look a lot at "long" and "wide" format data. Learn more ab
 
 https://www.statology.org/long-vs-wide-data/
 
-**Question 1:** Is this data long? Wide? Or sort of a combination of both?
+**Question 5:** Is this data long? Wide? Or sort of a combination of both?
 
-**Question 2:** What other things annoy you about this data table?
+**Question 6:** What other things annoy you about this data table?
 
 **Fun fact** this is about the best case scenario for how data looks. Most data people send you will be more confusing and more poorly curated than this, at lest in academia.
 
 ## dplyr
 
-I use the dplyr library , which is part of tidyverse to make my data less awful.
+I use the `dplyr` library , which is part of tidyverse, to work with data.
 
-I often use the following commands
+I often use the following commands: `filter`, `select`, `mutate`, `summarize`
 
 ### filter
 
@@ -100,9 +102,9 @@ env_5m_finiteNO2 <- env_5m %>%
   filter(!is.na(NO2))
 ```
 
-**Question:** Please filter just the samples from 150m that were collected in the year 2000.
+**Question 7:** Please write some code to make a new data frame with just the samples from 150m that were collected in the year 2000.
 
-**Question:** Now just the samples from 150m that were collected in June, July or August, that
+**Question 8:** Now keep just the samples from 150m that were collected in June, July or August.
 
 ### select
 
@@ -115,7 +117,7 @@ env_phosphate <- env00 %>%
   select(date_local, depth_n, PO4)
 ```
 
-**Task:** Please make a data frame which contains both Nitrate + Nitrite, Nitrite and Phosphorous concentrations as measured before the year 2005.
+**Question 9:** Please make a data frame which contains both Nitrate + Nitrite, Nitrite and Phosphorous concentrations as measured before the year 2005.
 
 ### mutate
 
@@ -125,6 +127,8 @@ Mutate is useful for changing columns
 env_phosphate_wlog <- env_phosphate %>%
   mutate(PO4_log = log10(PO4))
 ```
+
+**Question 11:** Sometimes in environmental biology we care about nitrogen to phosphorous ratios. Make a new dataframe that has a column for the phosphorous to nitrogen ratio.
 
 ### summarise
 
@@ -138,7 +142,7 @@ phosphate_summary <- env_phosphate %>%
 phosphate_summary
 ```
 
-**Question:** What happens if you comment out the line beginning `filter`. What about the line beginning with group_by. What does each line do?
+**Question 12:** What happens if you comment out the line beginning `filter`. What about the line beginning with group_by. What does each line do?
 
 # Pivoting
 
@@ -153,7 +157,7 @@ phosphate_wide <- env_phosphate %>%
 phosphate_wide
 ```
 
-**Question**: What does `values_fn = mean` do?
+**Question 13**: What does `values_fn = mean` do?
 
 Pivoting longer
 
@@ -164,9 +168,9 @@ env_5m_long <- env_5m %>%
   filter(!is.na(value))
 ```
 
-Questions: Why the select line? What does `cols = -date_local` mean?
+Questions: Why do I have the line beginning with `select`? What does `cols = -date_local` mean?
 
-### Excercise:
+**Question 14**:
 
 ```{r}
 bio00 <- read_csv(here("Data", "arisa_latlon_sort_vess_bio.csv"))
@@ -213,7 +217,7 @@ There are three other join operations and you can look them up by accessing the 
 
 `?full_join`
 
-Excercise: join the satellite and chemistry data using one of the other operators and describe how the output is different than mine.
+**Question 15:** join the satellite and chemistry data using one of the other operators and describe how the output is different than mine.
 
 # Plotting
 
@@ -267,6 +271,8 @@ chemistry_data_long_better %>%
   theme(axis.text.x = element_text(angle = -90), strip.text.y = element_text(angle = 0)) # rotate the x axis adn panel labels so they looks better
 ```
 
+**Question 16:** Modify the plot somehow. Explain what you did.
+
 # Big exercise
 
 You saw that the ARISA data had not particularly informative names. eg ARISA_643.4 What species even is that?
@@ -276,23 +282,13 @@ Check out the bins_taxonomy.csv table.
 Please do the following and put your code below.
 
 1.  Load that data in
-
-<!-- -->
-
-2)  Subset out only the taxonomy data from 5m.
-
-3)  Make a new column called `arisa_frag` which has complementary data to the `arisa_frag` column in the `arisa_fragments` data table we created earlier.
-
-4)  Subset out only the `arisa_frag` column, and the columns Phylum, Class, Order, Family, Genus into a new data frame called `taxonomy_table`
-
-5)  Combine `taxonomy_table` with `arisa_fragments`
-
-6)  Subset out only arisa fragments from the Proteobacteria phylum.
-
-7)  Find the sum of the relative abundances of all of the different classes of proteobacteria at each date and depth.
-
-8)  Plot your results.
-
-9)  If you have time, summarize the abundance of some other groups of bacteria.
+2.  Subset out only the taxonomy data from 5m.
+3.  Make a new column called `arisa_frag` which has complementary data to the `arisa_frag` column in the `arisa_fragments` data table we created earlier.
+4.  Subset out only the `arisa_frag` column, and the columns Phylum, Class, Order, Family, Genus into a new data frame called `taxonomy_table`
+5.  Combine `taxonomy_table` with `arisa_fragments`
+6.  Subset out only arisa fragments from the Proteobacteria phylum.
+7.  Find the sum of the relative abundances of all of the different classes of proteobacteria at each date and depth.
+8.  Plot your results.
+9.  If you have time, summarize the abundance of some other groups of bacteria.
 
 I will ask you to share your results with the class. If you don't make it that far, I will ask you to reflect on what you have accomplished.

@@ -1,0 +1,138 @@
+---
+title: "Ordination"
+author: "Jacob Cram"
+format: html
+editor: visual
+---
+
+# Loading in data
+
+Lets get some community structure data ready so we can use it
+
+```{r}
+library(tidyverse)
+library(here)
+library(vegan) # lots of useful functions for analyis of communities -- was originally for vegetation data, hense the name
+
+env00 <- read_csv(here("Data", "arisa_latlon_sort_vess_phys.csv"), na = c("nd"))
+
+bio00 <- read_csv(here("Data", "arisa_latlon_sort_vess_bio.csv"), na = "nd")
+arisa_fragments <- bio00 %>%
+  select(date_local, depth_n, arisa_frag, rel_abund) %>%
+  filter(!is.na(rel_abund))
+arisa_community <- arisa_fragments %>%
+  pivot_wider(names_from = arisa_frag, values_from = rel_abund, values_fn = median)
+```
+
+# Distance
+
+Ok. So we have our ginormous matrix of samples, species-level-groups and the relative abundances of each. One thing we can ask is, how similar are the samples to eachother in terms of which species they have.
+
+## Euclidian distance
+
+There are a couple of ways to do this. The simplest is euclidian distance. You likely calculated euclidian distance for two dimensional objects in pre-algebra.
+
+![https://science.howstuffworks.com/math-concepts/distance-formula.htm](images/paste-6CC1FA0C.png)
+
+This formula can be extended into multidimensional space. If you have `i` dimensions "say species" you can use the formula
+
+![](images/paste-3B8C3470.png)
+
+This is actually pretty easy to do when the numbers are small. Say we have two samples with three species.
+
+Sample 1: 3 horses, 2 camels, 0 cows
+
+Sample 2: 3 horses, 1 camel, 2 cows
+
+Then we can calculate the euclidian distance as.
+
+$$
+\sqrt{(3-3)^2 + (2-1)^2 + (0-2)^2}
+$$
+
+$$
+0^2 + 1^2 + 2^2 =0 + 1 + 4 = 5
+$$
+
+**Question 1:** Lets say sample 3 has 0 horses, 3 camels and 3 cows. Calculate its euclidian distance to sample 1 and sample 2.
+
+## Other distance metrics
+
+There are other distance metrics out there. You can read all about them by typing
+
+`?vegdist` into your terminal
+
+For my dissertation, my go-to for community structure differences was Bray-Curtis difference, which was designed to work for "Relative Abundance" data. These are data where everything sums to one (or 100%) However, for reasons outlined in this paper:
+
+Gloor, G. B., Macklaim, J. M., Pawlowsky-Glahn, V., & Egozcue, J. J. (2017). Microbiome Datasets Are Compositional: And This Is Not Optional. *Frontiers in Microbiology*, *8*. <https://doi.org/10.3389/fmicb.2017.02224>
+
+The best practice for any dataset where you only know species proportions of a whole (eg their relative abundance) is the *Aitchinson distance* or "*robust Aitchinson distance*". The `?vegdist` helpfile informs us that "Aitchison (1986) distance is equivalent to Euclidean distance between CLR-transformed samples ("clr") and deals with positive compositional data."
+
+And the robust version is useful if you have a bunch of zeros in the data.
+
+Thus, euclidian distance is often appropriate if you are looking for distances between environmental datasets where you know the real values of things (eg chemical concentrations), or community datasets where you know the abundances of organisms.
+
+Lots of R functions, especially principal components analysis (PCA), assume "euclidian" distances between things. Fortunately, you can just feed them centered log transformed data (or robust centerd log transformed data) and then they are actually using atchinson distances.
+
+## Calculating distance in R
+
+Lets calculate some distance matrices. First of all, I just wanted to check whether the arisa values are relative abundances or not. If they were they would all sum up to one.
+
+```{r}
+arisa_frag_sums <- arisa_fragments %>% group_by(arisa_frag) %>%
+  summarise(sum_of_rel_abund = sum(rel_abund))
+arisa_frag_sums
+```
+
+So you can see these relative abundance values are totally not "relative abundances". They don't sum up to one. Fortunately, we can fix this, by dividing the "relative abundances" by their sums.
+
+```{r}
+arisa_fragments_2 <- arisa_fragments %>% left_join(arisa_frag_sums, by = c("arisa_frag")) %>%
+  #filter(sum_of_rel_abund > 0) %>% # throw out the fragments that are always zero
+  mutate(actual_rel_abund = rel_abund/sum_of_rel_abund)
+arisa_fragments_2
+```
+
+Double checking that the "actual relative abundances sum to one"
+
+```{r}
+arisa_fragments_2 %>%
+  group_by(arisa_frag) %>%
+  summarise(sum_of_actual_rel_abund = sum(actual_rel_abund))
+```
+
+Looks better.
+
+Reshaping into a community matrix
+
+```{r}
+arisa_community2 <- arisa_fragments_2 %>%
+  select(date_local, depth_n, arisa_frag, actual_rel_abund) %>%
+  pivot_wider(names_from = arisa_frag, values_from = actual_rel_abund, values_fn = median)
+arisa_community2[1:10, 1:10]
+```
+
+Ok. So again, we're trying to calculate a distance matrix with vegdist. However, the expected input is a "matrix"
+
+```{r}
+class(arisa_community2)
+```
+
+And we've got a table.
+
+We can transmogrify this into a matrix, but matrices have to have all of the columns of the same type (eg numbers or characters) and our table has the first two rows as characters. We can fix this by using them as the "names" for the matrix.
+
+```{r}
+arisa_community3 <- arisa_community2 %>%
+  mutate(sampleID = paste(date_local, depth_n, sep = "_")) %>%
+  select(sampleID, starts_with("ARISA"))
+arisa_community3
+```
+
+```{r}
+arisa_community_mtx <- arisa_community3[,-1] %>% # throw away the column with the sampleIDs
+  as.matrix() # turn into matrix
+rownames(arisa_community_mtx) <- arisa_community3[,1] # use the sampleID colun as names
+```
+
+I don't get why the above isn't working.

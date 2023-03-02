@@ -55,6 +55,11 @@ library(here)
 ```
 
 ```{r}
+library(tidyverse)
+library(here)
+```
+
+```{r}
 env00 <- read_csv(here("Data", "arisa_latlon_sort_vess_phys.csv"), na = c("nd"))
 ```
 

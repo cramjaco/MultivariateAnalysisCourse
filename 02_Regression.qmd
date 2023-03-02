@@ -1,0 +1,296 @@
+---
+title: "Linear Regression"
+author: "Jacob Cram"
+format: html
+editor: visual
+---
+
+# Preamble
+
+Odds are, you've used linear regression to see how a few variables predict some other variable. If you want to really dive into these, consider taking a normal people statistics class. However, there are a few extra considerations when you have really a lot of variables.
+
+# Data
+
+Lets import and wrangle some data to play around with.
+
+```{r}
+library(tidyverse)
+library(here)
+library(broom)
+library(flextable)
+options(bitmapType="cairo")
+```
+
+For our example today, I want the relative abundances of some phylum level groups, and some chemistry data.
+
+```{r}
+# Biologicla Data
+bio00 <- read_csv(here("Data", "arisa_latlon_sort_vess_bio.csv"), na = "nd")
+arisa_fragments <- bio00 %>%
+  select(date_local, depth_n, arisa_frag, rel_abund)
+
+arisa_fragments_surface <- arisa_fragments %>%
+  filter(depth_n == "5")
+# Taxonomic information
+tax00 <- read_csv(here("Data", "bins_taxonomy.csv"), na = "nd")
+
+tax00_surface <- tax00 %>%
+  # just use the taxonomy data for the surface
+  filter(nodeDepths == 5) %>%
+  # make a column called arisa_frag that is comperable to the arisa_frag colum in arisa_fragments_surface
+  # I'm using str_remove and regular expressions: I highly recommend this cheat sheet
+  # https://evoldyn.gitlab.io/evomics-2018/ref-sheets/R_strings.pdf
+  mutate(arisa_frag = str_remove(nodeIDs,"^[^_]*_")) %>%
+  # just select the arisa_frag column and the primary Domain through genus level IDs for each fragment
+  select(arisa_frag, Domain:Genus)
+
+# stick the taxonomy information on to the arisa_fragments informaion
+# everything henseforth is only in the surface
+biotax <- left_join(arisa_fragments_surface, tax00_surface, by = "arisa_frag") %>%
+  select(-depth_n)
+
+phyla_df <- biotax %>%
+  # Making a new phylum column that treats the different classes of proteobacteria as their own thing
+  mutate(Phylum2 = if_else(Phylum == "Proteobacteria", Class, Phylum)) %>%
+  # Summing the relative abundances of each phylum
+  group_by(date_local, Phylum2) %>%
+  summarise(rel_abund = sum(rel_abund), .groups = "keep") %>%
+  ungroup()
+
+# We shouldn't do stats on data that are bounded between zero and one for reasons. We need to CLR transform the data, which we will discuss
+mra <- phyla_df %>% 
+  filter(rel_abund > 0) %>%
+  summarise(min_rel_abund = min(rel_abund)) %>%
+  pull(min_rel_abund) # 0.00055 Th smallest non-zero value
+
+geometric_means <- phyla_df %>%
+  mutate(rel_abund_nudge = rel_abund + mra) %>%
+  group_by(date_local) %>%
+  summarise(geometric_mean = exp(mean(log(rel_abund_nudge)))) %>%
+  ungroup()
+
+phyla_clr <- phyla_df %>%
+  mutate(rel_abund_nudge = rel_abund + mra) %>%
+  left_join(geometric_means, by = "date_local") %>%
+  mutate(clr = log(rel_abund_nudge/geometric_mean)) %>%
+  select(-c(rel_abund_nudge, geometric_mean))
+
+
+phyla_wide <- phyla_clr %>%
+  pivot_wider(names_from = Phylum2, values_from = clr)
+
+# Environmental Data  
+env00 <- read_csv(here("Data", "arisa_latlon_sort_vess_phys.csv"), na = c("nd"))
+env_5m <- env00 %>%
+  filter(depth_n == 5)
+env_5m_b <- env_5m %>%
+  select(date_local, depth_n, temp, sal, NO2, NO3_NO2, PO4, SiO3)
+```
+
+# Simple regression
+
+So a normal human researcher might ask something like. How do alpha-proteobacteria relate to temperature. That's pretty easy with linear regression. Our main challenge is to get the data together into a single table.
+
+```{r}
+# Big table with the phylum and enviornmental data
+phyla_env <- inner_join(phyla_wide, env_5m_b, by = c("date_local"))
+# Smaller table with just the alphaproteobacteria and temperature data
+alpha_temp <- phyla_env %>%
+  select(date_local, Alphaproteobacteria, temp)
+```
+
+Now if you look at alpha_temp, there are a bunch of NA values. With just two variables, its reasonable to drop the rows where there are NAs.
+
+```{r}
+alpha_temp_nona <- alpha_temp %>% na.omit()
+```
+
+Lets look at the data
+
+```{r}
+alpha_temp_nona %>%
+  ggplot(aes(y = Alphaproteobacteria, x = temp)) +
+  geom_point() +
+  # and put a regression line through it
+  geom_smooth(method = "lm")
+```
+
+Nothing to write home about.
+
+So now we can do our regression
+
+```{r}
+alpha_temp_model <- lm(Alphaproteobacteria~temp,data = alpha_temp_nona)
+summary(alpha_temp_model)
+```
+
+As you can see, our p-value is like 87% and our R squared is really small. So there is basically not a statistically detectable relationship between alphaproteobacteria and temperature.
+
+One kind of neat package is `broom` which prints out summary tables as a data frame. This will come in handy soon.
+
+```{r}
+alpha_temp_model %>% tidy
+```
+
+This is nice because its a table with our coefficients, t-value and p-values. It of course is missing things like R\^2, so if you are attached to that, you might have to code your own function.
+
+# Multi-Y regression
+
+So. We discovered that alphaproteobacteria are not particularly related in their abundance to temperature. But why limit ourselves to alphaproteobacteria? Why not try all of the phyla?
+
+Many students will do something like do the above analyis like 20 times, once for each phylum. This becomes a problem if you want to later change anything about your analysis. You'd have to do that to everything. Also its a lot of typing or else copy pasting. What I like to do instead is keep track of things using the `purrr` package and its `map` functions.
+
+(He says as if he remembers how to do this)
+
+```{r}
+temp_df <- env_5m_b %>% select(date_local, temp)
+phyla_temp <- phyla_clr %>%
+  # merging with the temperature data, there will be lots of redundant information
+  left_join(temp_df, by = "date_local") %>%
+  # tossing the missing values
+  filter(!is.na(clr),!is.na(temp))
+```
+
+Now what we need to do is "nest" the relative abundance and temperature information This gives us a data frame, with a new column `data` which has data frames for each phylum
+
+```{r}
+phyla_temp_nested <- phyla_temp %>%
+  group_by(Phylum2) %>%
+  nest()
+```
+
+The easiest way to look at this is to open it up and click on each data frame.
+
+Now we can apply operations to each of these data frames
+
+```{r}
+phyla_temp_analysis_1 <- phyla_temp_nested %>%
+  # do the linear models
+  mutate(mod = map(data, ~lm(clr~temp, data = .)))
+```
+
+```{r}
+phyla_temp_analysis_2 <- phyla_temp_analysis_1 %>%
+  # do the linear models
+  mutate(results = map(mod, tidy))
+```
+
+```{r}
+phyla_temp_analysis_unnested_1 <- phyla_temp_analysis_2 %>%
+  select(Phylum2, results) %>%
+  unnest(results) %>%
+  ungroup()
+```
+
+We kind of don't care about the intercepts though, and the p values are hard to read
+
+```{r}
+phyla_temp_analysis_unnested_2 <- phyla_temp_analysis_unnested_1 %>%
+  filter(term == "temp")
+phyla_temp_analysis_unnested_2
+```
+
+I can pretty this up even more using `format` which is good for rounding things, and flextable, which bolds things and makes pretty tables.
+
+```{r}
+phyla_temp_analysis_unnested_2 %>%
+  mutate(coef = format(estimate, digits = 2)) %>%
+  mutate(SE = format(std.error, digits = 1)) %>%
+  mutate(p = format.pval(p.value, digits = 2)) %>%
+  select(Phylum2, coef, SE, p) %>%
+  flextable() %>%
+  bold(i = ~p < 0.05, j = "p")
+```
+
+## False discovery rate corrections.
+
+Ok, so now it looks like maybe "Bacteroidetes" and "Gammaproteobacteria" are related to temperature. They certainly have a p values less than 0.05, which is promising. However, there's a big caviat here. We've done ten statistical tests. If you do enough statistical tests, you are likely to get some false positives, even on random data.
+
+For instance, lets shuffle the order of the clr values and try again
+
+```{r}
+set.seed(10035)
+phyla_temp_shuffled <- phyla_temp %>%
+  select(-rel_abund) %>% # lets toss this column to avoid confusion
+  mutate(old_clr = clr) %>%
+  mutate(clr = sample(old_clr))
+```
+
+Now we do the analysis we just did
+
+```{r}
+
+phyla_temp_shuffled %>%
+  # do math
+  select(-old_clr) %>% # removed to avoid confusion and bloat
+  group_by(Phylum2) %>%
+  nest() %>%
+  mutate(mod = map(data, ~lm(clr~temp, data = .))) %>%
+  mutate(results = map(mod, tidy)) %>%
+  unnest(results) %>%
+  filter(term == "temp") %>%
+  # make pretty
+  mutate(coef = format(estimate, digits = 2)) %>%
+  mutate(SE = format(std.error, digits = 1)) %>%
+  mutate(p = format.pval(p.value, digits = 2)) %>%
+  select(Phylum2, coef, SE, p) %>%
+  flextable() %>%
+  bold(i = ~p < 0.05, j = "p")
+```
+
+Ok, bad example. These actually look worse than the non-shuffled data, which is promising. We want things to look worse when we shuffle the data. If we shuffle 100 times, we can actually use that as a way of testing whether things look sane. What about with random numbers
+
+```{r}
+set.seed(10035)
+make_pretty_table_for_random_analysis <- function(df){
+  df %>%
+  mutate(coef = format(estimate, digits = 2)) %>%
+  mutate(SE = format(std.error, digits = 1)) %>%
+  mutate(p = format.pval(p.value, digits = 2)) %>%
+  select(Phylum, coef, SE, p) %>%
+  flextable() %>%
+  bold(i = ~p < 0.05, j = "p")
+}
+
+random_data <- tibble(
+  Phylum = sort(rep(paste("Phylum", LETTERS[1:25]), length.out = 1000)),
+  Abundance = rnorm(1000),
+  EnvironmentalVariable = rnorm(1000)
+)
+
+random_data %>% 
+  group_by(Phylum) %>%
+  nest() %>%
+  mutate(mod = map(data, ~lm(Abundance ~ EnvironmentalVariable, data = .))) %>%
+  mutate(results = map(mod, tidy)) %>%
+  select(Phylum, results) %>%
+  unnest(results) %>%
+  filter(term == "EnvironmentalVariable") %>%
+  make_pretty_table_for_random_analysis()
+```
+
+You can see that with this random data and 25 rather than 10 phyla, we have two that look statistically significant. So we want to adjust for this randomness, and one way to do this is with false discovery rates.
+
+The false discovery rate asks not how likely any one value is to be a false positive, but rather what the likely fraction of false positives likely is in your dataset. So if you have an FDR of 5%, of the things that make that cutoff, about 5% of them are likely to have emerged by random chance. Fortunately FDR is really easy to calculate.
+
+```{r}
+make_pretty_table <- function(df){
+  df %>%
+  mutate(coef = format(estimate, digits = 2)) %>%
+  mutate(SE = format(std.error, digits = 1)) %>%
+  mutate(p = format.pval(p.value, digits = 2)) %>%
+  mutate(fdr = format(fdr, digits = 2)) %>%
+  select(Phylum2, coef, SE, p, fdr) %>%
+  flextable() %>%
+  bold(i = ~p < 0.05, j = "p") %>%
+  bold(i = ~fdr < 0.05, j = "fdr")
+}
+
+phyla_temp_analysis_unnested_2 %>%
+  ungroup() %>%
+  mutate(fdr = p.adjust(p.value, method = "BH")) %>%
+  make_pretty_table()
+# if the fdr values are the same as the input values, its because the input data-frame is still grouped
+```
+
+So now we see that it is likely that more than 5% of our so-called positives are likely false positives. Sometimes though, people pick false discovery rate cutoffs that are larter than 5%. In one of my papers I used 20%. Which is to say, here are a bunch of results, I think at least 80% of them are true and the rest are probably false. I don't have enough information to say which are which at this point.

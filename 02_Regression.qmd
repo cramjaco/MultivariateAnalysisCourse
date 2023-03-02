@@ -28,6 +28,7 @@ library(tidyverse)
 library(here)
 library(broom)
 library(flextable)
+library(glmnet)
 options(bitmapType="cairo")
 set.seed(10033)
 ```
@@ -111,6 +112,7 @@ phyla_clr <- phyla_df %>%
 
 # Reshaping -- see the data wrangling lesson
 phyla_wide <- phyla_clr %>%
+  select(-rel_abund) %>% # discard the relative abundance info, we are just going to work with clr data
   pivot_wider(names_from = Phylum2, values_from = clr)
 
 # Environmental Data  
@@ -367,6 +369,138 @@ So now we see that it is likely that more than 5% of our so-called positives are
 
 # Many X
 
-So you are likely more accustomed to the situation where you want to see how a single dependent variable, say `Gammaproteobacteria` abundance, relates to a bunch of 
+So you are likely more accustomed to the situation where you want to see how a single dependent variable, say `Gammaproteobacteria` abundance, relates to the abundance a bunch of independent variables, say enviornmental predictors. The `lm` function makes this pretty easy.
+
+## Challenge of missing data
+However, when you are working with environmental data odds are a bunch of them are missing. Eg, some sample got dropped, or a sensor didn't work one day or two. At this point it becomes very dubious to just discard samples with missing data, both for reasons of statistical power, and for reasons of doing good statistics in general Serious statisticians have a variety of methods for handeling missing data. One important consideration is whether your data are missing at random. If for instance you can't ever measure nutrients in the ocean when the waves are over 3 m tall (your boat would sink), you data might be missing not at random. 
+
+We aren't going to go into the statistics of missing data in this class, but definately they are something worth reading about and exploring, especially if you have a bunch of missing data.
+
+One thing that you can do is *imputation*, which is filling in `NA` values with some sane value. Sometimes people impute with median or mean values, for instance. One down-side of imputing with medians is that they tend to decrease the variance of your data, and so *multiple imputation* , in which you impute with data with a similar mean and variance as your observed data. However, the data are essentially randomly generated, and so the randomness can affect your data. So the current best practice for multiple imputation is to fill in with some randomly generated data more than once (eg 5 or 20 times) and then do your statistics 5 or 20 times, and then report summary statistics of all of your different imputed data sets.
+
+I don't wan't to do that here, so we'll do some median imputation for now.
+
+## Data wrangling
+
+Lets combine the gammaproteobacteria data with the selected enviornmental data
+
+```{r}
+gamma_env <- phyla_env %>% select(Gammaproteobacteria, temp:SiO3)
+```
+
+Looking at missing data patterns
+```{r}
+gamma_env %>% nrow()
+gamma_env %>% filter(!is.na(Gammaproteobacteria)) %>% nrow()
+gamma_env %>% filter(!is.na(Gammaproteobacteria) & !is.na(temp)) %>% nrow()
+gamma_env %>% na.omit() %>% nrow()
+```
+
+**Task:** Please comment the above code chunk to describe what each line is checking?
+
+Below I'm mostly just checking how many missing values are in each column
+```{r}
+summary(gamma_env)
+```
+SiO3 is clearly missing a lot of the time.
+
+Now I'm going to just take the rows where there are gamma-proteobacteria and at least one environmental column with data.
+Then I'm going to impute the missing values with medians
+```{r}
+gamma_env_hasdata <- gamma_env %>%
+  filter(!is.na(Gammaproteobacteria)) %>%
+  filter(if_any(everything(), ~ !is.na(.)))
+
+gamma_env_impute <- gamma_env_hasdata %>%
+  mutate_if(is.numeric, ~replace(., is.na(.), median(., na.rm = TRUE)))
+```
+
+Then I run a linear regression on the imputed data.
+```{r}
+gamma_mod <- lm(Gammaproteobacteria ~ . ,data = gamma_env_impute) # "." means everything
+summary(gamma_mod)
+```
+
+**Question:** What can you say about the environmental correlates of Gammaproteobacterial relative abundance?
+
+**Question:** How might the missing values be affecting this analysis?
+
+# Putting it all together
+We can of course do multi-x and multi-y regression with stuff we have so far.
+
+First lets get rid of rows missing species data, and rows missing environenttal data
+
+```{r}
+phyla_env_hasdata <- phyla_env %>%
+  filter(if_any(Actinobacteria:`NA`, ~ !is.na(.))) %>%
+  filter(if_any(temp:SiO3, ~is.na(.))) %>%
+  select(-depth_n)
+```
+
+Then lets impute the missing data with medians
+
+```{r}
+phyla_env_imputed <- phyla_env_hasdata %>%
+  mutate_if(is.numeric, ~replace(., is.na(.), median(., na.rm = TRUE)))
+```
+
+Pivot just the phyla longer, but not the environmental data
+
+```{r}
+phyla_env_long <- phyla_env_imputed %>%
+  pivot_longer(Actinobacteria:`NA`, names_to = "Phylum2", values_to = "clr")
+```
+
+Nest the data
+```{r}
+phyla_env_nested <- phyla_env_long %>%
+  select(-date_local) %>% # not used in the analyis so discarded
+  group_by(Phylum2) %>%
+  nest() %>%
+  rename(data_frames = data) # things get confusing later if we keep calling this column "data"
+```
+
+Run model the data
+
+```{r}
+phyla_env_models <- phyla_env_nested %>%
+  mutate(mod = map(data_frames, ~lm(clr ~ ., data = . ))) %>% 
+  mutate(tidied_mod = map(mod, ~tidy(.)))
+
+phyla_env_model_unnest <- phyla_env_models %>%
+  select(Phylum2, tidied_mod) %>%
+  unnest(tidied_mod)
+phyla_env_model_unnest
+```
+
+
+```{r}
+phyla_env_model_output <- phyla_env_model_unnest %>%
+  filter(term != "(Intercept)") %>%
+  mutate(fdr_ungrouped = p.adjust(p.value)) %>%
+  group_by(term) %>%
+  mutate(fdr = p.adjust(p.value))
+phyla_env_model_output
+```
+
+```{r}
+phyla_env_model_output %>%
+  mutate(coef = format(estimate, digits = 2)) %>%
+  mutate(SE = format(std.error, digits = 1)) %>%
+  mutate(p = format.pval(p.value, digits = 2)) %>%
+  mutate(fdr_ungrouped = format.pval(fdr_ungrouped, digits = 2)) %>%
+  mutate(fdr = format.pval(fdr, digits = 2)) %>%
+  select(Phylum2, term, coef, SE, p, fdr, fdr_ungrouped) %>%
+  flextable() %>%
+  bold(i = ~p < 0.05, j = "p") %>%
+  bold(i = ~fdr < 0.2, j = "fdr") %>%
+  bold(i = ~fdr_ungrouped < 0.2, j = "fdr_ungrouped") %>%
+    identity()
+  
+```
+
+**Question:** What is the difference between fdr_ungrouped and fdr? Specifically (A) How are they differently calculated? (B) What are the differences in their patterns?
+
+**Question:** How would you describe the patterns shown in this table?
 
 

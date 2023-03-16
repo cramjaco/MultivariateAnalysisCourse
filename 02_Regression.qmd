@@ -4,7 +4,9 @@ author: "Jacob Cram"
 format: html
 editor: visual
 ---
+
 # Group Details
+
 Please write the names of everyone in your group here:
 
 If you are feeling creative, put a name for your group here:
@@ -188,6 +190,7 @@ So. We discovered that alpha-proteobacteria are not particularly related in thei
 Many students will do something like perform the above analysis 20 times, once for each phylum. That approach becomes a problem if you want to later change anything about your analysis. You'd have to do that to everything. Also its a lot of typing or else copy pasting. What I like to do instead is keep track of things using the `purrr` package and its `map` functions.
 
 ## Looking at phyla data
+
 First things first, lets look at the phylum level data. Both as relative abundances and as CLR transformed data.
 
 ```{r fig.height=8, fig.width = 4}
@@ -197,6 +200,7 @@ phyla_clr %>%
   facet_grid(Phylum2 ~ measurement_type, scales = "free_x") +
   theme(strip.text.y = element_text(size = 6))
 ```
+
 You can also see what the CLR transform does to these values with these histograms.
 
 **Question:** Which phylum tends to has the highest relative abundance?
@@ -238,7 +242,7 @@ phyla_temp_analysis_1 <- phyla_temp_nested %>%
 
 **Question:** What is going on in the mod column?
 
-Hint: Try running `phyla_temp_analysis_1$mod[[1]]`, `phyla_temp_analysis_1$mod[[2]]`,   `phyla_temp_analysis_1$mod[[2]] %>% summary()`, and things of that nature in the console.
+Hint: Try running `phyla_temp_analysis_1$mod[[1]]`, `phyla_temp_analysis_1$mod[[2]]`, `phyla_temp_analysis_1$mod[[2]] %>% summary()`, and things of that nature in the console.
 
 ```{r}
 phyla_temp_analysis_2 <- phyla_temp_analysis_1 %>%
@@ -417,6 +421,7 @@ gamma_env <- phyla_env %>% select(Gammaproteobacteria, temp:SiO3)
 ```
 
 Lets visualize the data
+
 ```{r}
 gamma_env %>%
   pivot_longer(cols = everything(), names_to = "measurement", values_to = "value") %>%
@@ -424,6 +429,7 @@ gamma_env %>%
   geom_histogram() +
   facet_wrap(~measurement, scales="free_x", nrow = 2)
 ```
+
 One might consider log-transforming some of these, especially NO3_NO2. I'm not going to today, consider that a caviat.
 
 Looking at missing data patterns
@@ -546,6 +552,6 @@ phyla_env_model_output %>%
 
 **Question:** How would you describe the patterns shown in this table?
 
-**# Task:** Make a plot to more easily visualize the data in the table.
+**\# Task:** Make a plot to more easily visualize the data in the table.
 
-**Question:** What would you do if you wanted to look at the relationship between 20 most abundant species (rather than phyla), and the chemical parameters. 
+**Question:** What would you do if you wanted to look at the relationship between 20 most abundant species (rather than phyla), and the chemical parameters.

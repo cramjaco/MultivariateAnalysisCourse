@@ -1,0 +1,16 @@
+---
+title: "Scratch Work"
+author: "Jacob Cram"
+format: html
+---
+## Variable selection
+{I think I don't want to do this}
+
+We ought to spend a whole day on lasoo regression, but for now, it can be one way to do variable selection.
+
+```{r}
+lasso_mod <- cv.glmnet(y = gamma_env_impute %>% pull(Gammaproteobacteria),
+       x = gamma_env_impute %>% select(-Gammaproteobacteria) %>% as.matrix()
+)
+lasso_mod %>% coef(., s = "lambda.min")
+```

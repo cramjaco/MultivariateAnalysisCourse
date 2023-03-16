@@ -1,0 +1,596 @@
+---
+title: "Ordination"
+author: "Jacob Cram"
+format: html
+editor: visual
+---
+
+# Preamble
+
+In the last lesson we focued on relationships between a few variables at a time. But sometimes we want to know about trends that unfold across many many variables. One approach is to look at similarity between samples.
+
+# Loading in data
+
+Lets get some community structure data ready so we can use it
+
+```{r}
+library(tidyverse)
+library(here)
+library(vegan) # lots of useful functions for analyis of communities -- was originally for vegetation data, hense the name
+library(cowplot)
+
+env00 <- read_csv(here("Data", "arisa_latlon_sort_vess_phys.csv"), na = c("nd"))
+
+bio00 <- read_csv(here("Data", "arisa_latlon_sort_vess_bio.csv"), na = "nd")
+arisa_fragments <- bio00 %>%
+  select(date_local, depth_n, arisa_frag, rel_abund) %>%
+  filter(!is.na(rel_abund))
+arisa_community <- arisa_fragments %>%
+  pivot_wider(names_from = arisa_frag, values_from = rel_abund, values_fn = median)
+```
+
+# Distance
+
+Ok. So we have our ginormous matrix of samples, species-level-groups and the relative abundances of each. One thing we can ask is, how similar are the samples to each other in terms of which species they have.
+
+## Euclidian distance
+
+There are a couple of ways to do this. The simplest is euclidian distance. You likely calculated euclidian distance for two dimensional objects in middle or high-school level pre-algebra.
+
+![https://science.howstuffworks.com/math-concepts/distance-formula.htm](images/paste-6CC1FA0C.png)
+
+This formula can be extended from two dimensional space into multidimensional space. If you have `i` dimensions say "species" or chemical parameters you can use the formula
+
+![](images/paste-3B8C3470.png)
+
+This is actually pretty easy to do when the numbers are small. Say we have two samples with three species.
+
+Sample 1: 3 horses, 2 camels, 0 cows
+
+Sample 2: 3 horses, 1 camel, 2 cows
+
+Then we can calculate the euclidian distance as.
+
+$$
+\sqrt{(3-3)^2 + (2-1)^2 + (0-2)^2}
+$$
+
+$$
+0^2 + 1^2 + 2^2 =0 + 1 + 4 = 5
+$$
+
+**Question 1:** Lets say sample 3 has 0 horses, 3 camels and 3 cows. Calculate its euclidian distance to sample 1 and sample 2.
+
+## Other distance metrics
+
+There are other distance metrics out there. You can read all about them by typing
+
+`?vegdist` into your terminal
+
+For my dissertation, my go-to for community structure differences was Bray-Curtis dissimilarity, which was designed to work for "Relative Abundance" data. These are data where everything sums to one (or 100%). However, for reasons outlined in this paper:
+
+Gloor, G. B., Macklaim, J. M., Pawlowsky-Glahn, V., & Egozcue, J. J. (2017). Microbiome Datasets Are Compositional: And This Is Not Optional. *Frontiers in Microbiology*, *8*. <https://doi.org/10.3389/fmicb.2017.02224>
+
+The best practice for any dataset where you only know species proportions of a whole (eg their relative abundance) is the *Aitchinson distance* or "*robust Aitchinson distance*". The `?vegdist` help file informs us that "Aitchison (1986) distance is equivalent to Euclidean distance between CLR-transformed samples ("clr") and deals with positive compositional data." We calculated CLR distances in the last lesson. Thus, we can CLR transform the data and just do euclidian distances, or we can use built-in atchinson distance calculations on the untransformed data.
+
+And the robust version is useful if you have a bunch of zeros in the data.
+
+Thus, euclidian distance is often appropriate if you are looking for distances between environmental datasets where you know the real values of things (eg chemical concentrations), or community datasets where you know the actual abundances of organisms.
+
+Lots of R functions, especially principal components analysis (PCA), assume "euclidian" distances between things. Fortunately, you can just feed them centered log transformed data (or robust centerd log transformed data) and then they are actually using atchinson distances.
+
+## Calculating distance in R
+
+Lets calculate some distance matrices. First of all, I just wanted to check whether the ARISA values are relative abundances or not. If they were they would all sum up to one.
+
+```{r}
+arisa_frag_sums <- arisa_fragments %>% group_by(date_local, depth_n) %>%
+  summarise(sum_of_rel_abund = sum(rel_abund))
+arisa_frag_sums
+```
+
+So good news, the sum of the values of each ARISA fragment are indeed one, which means we are actually looking at relative abundances.
+
+Reshaping into a (wide format) community matrix
+
+```{r}
+arisa_community2 <- arisa_fragments %>%
+  select(date_local, depth_n, arisa_frag, rel_abund) %>%
+  pivot_wider(names_from = arisa_frag, values_from = rel_abund, values_fn = median)
+arisa_community2[1:10, 1:10]
+```
+
+Ok. So again, we're trying to calculate a distance matrix with vegdist. However, the expected input is a "matrix"
+
+```{r}
+class(arisa_community2)
+```
+
+And we've got a \`data.frame\`.
+
+We can transmogrify this into a matrix, but matrices have to have all of the columns of the same type (eg numbers or characters) and our table has the first two rows as characters. We can fix this by using them as the "names" for the matrix.
+
+```{r}
+arisa_community3 <- arisa_community2 %>%
+  mutate(sampleID = paste(date_local, depth_n, sep = "_")) %>%
+  select(sampleID, starts_with("ARISA"))
+arisa_community3
+```
+
+Building the matrix, and then giving it the appropriate rownames
+
+```{r}
+arisa_community_mtx <- arisa_community3[,-1] %>% # throw away the column with the sampleIDs
+  as.matrix() # turn into matrix
+rownames(arisa_community_mtx) <- arisa_community3$sampleID # use the sampleID colun as names
+```
+
+Note that I can't take just the first column with `rownames(arisa_community_mtx) <- arisa_community3[,1]` because this returns a one column tibble which doesn't fit into the rownames, and throws an error. I spent a bunch of time figuring this out while writing this lesson. However, I can do `rownames(arisa_community_mtx) <- arisa_community3[[1]]`. But I don't really want to get into what double parentheses are for - take Slava's class or ask me about it if you really care.
+
+## Actually making the distance matrix (or three)
+
+I"m using different methods to compute the distances, you can read about some of them in the vegdist help fiel.
+
+```{r}
+arisa_euclid <- vegdist(arisa_community_mtx, method = "euclid")
+arisa_bray <- vegdist(arisa_community_mtx, method = "bray")
+arisa_robust_aitchinson <- vegdist(arisa_community_mtx, method = "robust.aitchison")
+```
+
+Distance matrices are kind of hard to visualize
+
+```{r}
+str(arisa_euclid)
+```
+
+```{r}
+source(here("Libraries", "jacob_functions.R"))
+```
+
+I borrowed a package online for looking at them
+```{r}
+coldiss(arisa_euclid)
+```
+
+The bray curtis distance looks a little more modular than the euclidian distance.
+
+```{r}
+coldiss(arisa_bray)
+```
+
+# Multidimensional scaling
+Multidimensional scaling is one way to look at distance objects.
+
+```{r}
+arisa_euclid_mds <- metaMDS(arisa_euclid)
+arisa_bray_mds <- metaMDS(arisa_bray)
+arisa_robust_aitchinson_mds <- metaMDS(arisa_robust_aitchinson)
+```
+
+*Question:* What are these 20 runs that it is doing for every caclulation?
+
+```{r}
+plot(arisa_euclid_mds)
+```
+
+We can do similar analyses
+
+```{r}
+plot(arisa_bray_mds)
+```
+
+```{r}
+plot(arisa_robust_aitchinson_mds)
+```
+
+*Question:* What can you say so far about the differences in patterns.
+
+## Color coded Multidimensional scaling plots
+Of course, it would be nice to have some information about the samples too.
+
+Lets focus on the robust aitchinson mds results.
+
+
+This is mostly a matter of data wrangling.
+```{r}
+arisa_robust_aitchinson_mds_scores <- arisa_robust_aitchinson_mds %>% scores(display = "sites") %>% as.data.frame() %>% rownames_to_column("SampleID") %>%
+  separate(SampleID, into = c("date_local", "depth_n"), sep = "_") %>%
+  mutate(date_local = as.Date(date_local)) %>%
+  identity()
+arisa_robust_aitchinson_mds_scores
+```
+
+**Question:** What does the `scores` function (above) do?
+
+Then we can append the nmds scores to the env00 data frame Now we can plot stuff.
+
+```{r}
+depths_in_order <- c("5", "CMAX", "150", "500", "890")
+
+env_rat <- env00 %>%
+  left_join(arisa_robust_aitchinson_mds_scores, by = c("date_local", "depth_n")) %>%
+  mutate(depth_n = factor(depth_n, levels = depths_in_order)) # I'm mkaing depth_n a factor so its in order
+```
+
+```{r}
+env_rat %>%
+  ggplot(aes(x = NMDS1,  y = NMDS2, col = depth_n)) +
+  geom_point() +
+  scale_color_manual(values = c("red", "green", "grey", "blue", "black")) +
+  theme_bw()
+```
+
+**Question:** What can you tell me about the two big clusters?
+
+```{r fig.width = 6, fig.height = 2}
+dl_plot <- env_rat %>%
+  ggplot(aes(x = NMDS1,  y = NMDS2, col = day_length)) +
+  geom_point() +
+  scale_color_viridis_c(name = "DL") +
+  theme_bw()
+
+ddl_plot <-  env_rat %>%
+  ggplot(aes(x = NMDS1,  y = NMDS2, col = day_length_change_per_month)) +
+  geom_point() +
+  scale_color_viridis_c(name = "DDL") +
+  theme_bw()
+
+plot_grid(dl_plot, ddl_plot)
+```
+
+**Question:** What do the plots above show?
+
+So here's the thing. There might be seasonal patterns, but they might be getting masked by the between depth variability. Lets look within a depth.
+
+```{r}
+# extract data from one depth
+arisa_community_5m <- arisa_community2 %>% filter(depth_n == "5") %>% select(-depth_n)
+
+# turn into a matrix
+arisa_community_mtx_5m <- arisa_community_5m[,-1] %>% # throw away the column with the dates
+  as.matrix() # turn into matrix
+rownames(arisa_community_mtx_5m) <- arisa_community_5m$date_local %>% as.character # as character because its confusing to use dates as rownames
+
+# calculate distance matrix
+arisa_5m_robust_aitchinson <- vegdist(arisa_community_mtx_5m, method = "robust.aitchison")
+
+# calculate mds
+arisa_5m_robust_aitchinson_mds <- metaMDS(arisa_5m_robust_aitchinson)
+
+# extract scores
+arisa_5m_robust_aitchinson_mds_scores <- scores(arisa_5m_robust_aitchinson_mds, display = "sites") %>% as.data.frame() %>% rownames_to_column("date_local") %>%
+  #separate(SampleID, into = c("date_local", "depth_n"), sep = "_") %>% # don't need to do this
+  mutate(date_local = as.Date(date_local)) %>%
+  identity()
+
+## append to env00
+env_rat_5m <- env00 %>%
+  filter(depth_n == "5") %>%
+  left_join(arisa_5m_robust_aitchinson_mds_scores, by = c("date_local"))
+```
+
+```{r fig.width = 6, fig.height = 2}
+dl_plot_5m <- env_rat_5m %>%
+  ggplot(aes(x = NMDS1,  y = NMDS2, col = day_length)) +
+  geom_point() +
+  scale_color_viridis_c(name = "DL") +
+  theme_bw()
+
+ddl_plot_5m <-  env_rat_5m %>%
+  ggplot(aes(x = NMDS1,  y = NMDS2, col = day_length_change_per_month)) +
+  geom_point() +
+  scale_color_viridis_c(name = "DDL") +
+  theme_bw()
+
+plot_grid(dl_plot_5m, ddl_plot_5m)
+```
+
+**Question:** How is this nmds plot different from the one above. What useful things does it show that the last one doesn't?
+
+Now if we want to do this for all of the other depths, we shouldn't just copy text down. Lets make the above work into a function.
+
+```{r}
+distance_by_depth_calculator <- function(target_depth_n){
+  # extract data from one depth
+  arisa_community_Xm <- arisa_community2 %>% filter(depth_n == target_depth_n) %>% select(-depth_n)
+  
+  # turn into a matrix
+  arisa_community_mtx_Xm <- arisa_community_Xm[,-1] %>% # throw away the column with the dates
+    as.matrix() # turn into matrix
+  rownames(arisa_community_mtx_Xm) <- arisa_community_Xm$date_local %>% as.character # as character because its confusing to use dates as rownames
+  
+  # calculate distance matrix
+  arisa_Xm_robust_aitchinson <- vegdist(arisa_community_mtx_Xm, method = "robust.aitchison")
+  
+  # calculate mds
+  arisa_Xm_robust_aitchinson_mds <- metaMDS(arisa_Xm_robust_aitchinson)
+  
+  # extract scores
+  arisa_Xm_robust_aitchinson_mds_scores <- scores(arisa_Xm_robust_aitchinson_mds, display = "sites") %>% as.data.frame() %>% rownames_to_column("date_local") %>%
+    #separate(SampleID, into = c("date_local", "depth_n"), sep = "_") %>% # don't need to do this
+    mutate(date_local = as.Date(date_local)) %>%
+    identity()
+  
+  ## append to env00
+  env_rat_Xm <- env00 %>%
+    filter(depth_n == target_depth_n) %>%
+    left_join(arisa_Xm_robust_aitchinson_mds_scores, by = c("date_local"))
+  
+  return(env_rat_Xm)
+}
+
+distance_by_depth_plotter <- function(env_rat_Xm, target_depth_n){
+  dl_plot_Xm <- env_rat_Xm %>%
+    ggplot(aes(x = NMDS1,  y = NMDS2, col = day_length)) +
+    geom_point() +
+    scale_color_viridis_c(name = "DL") +
+    labs(title = paste("depth = ", target_depth_n)) +
+    theme_bw() 
+  
+  ddl_plot_Xm <-  env_rat_Xm %>%
+    ggplot(aes(x = NMDS1,  y = NMDS2, col = day_length_change_per_month)) +
+    geom_point() +
+    scale_color_viridis_c(name = "DDL") +
+    labs(title = paste("depth = ", target_depth_n)) +
+    theme_bw()
+  
+  plot_grid(dl_plot_Xm, ddl_plot_Xm)
+}
+
+distance_by_depth_everythinginator <- function(target_depth_n){
+  env_rat_Xm_loc <- distance_by_depth_calculator(target_depth_n)
+  distance_by_depth_plotter(env_rat_Xm_loc, target_depth_n)
+}
+```
+
+```{r fig.width = 6, fig.height = 2}
+distance_by_depth_everythinginator("150")
+```
+
+**Question:** What does the `distance_by_depth_everythinginator()` function do?
+
+Once I have that function, I can use `map` to apply it to every depth.
+```{r}
+#\ output: false
+# one million hacker-points to anyone who can figure out why I can't prevent it from displaying the output with the above code.
+# https://quarto.org/docs/computations/execution-options.html
+depth_plots <- map(depths_in_order, distance_by_depth_everythinginator)
+```
+
+```{r fig.width = 6, fig.height = 2}
+walk(depth_plots, print)
+```
+
+# Environmental distances
+
+Of course, environmental variables can also be translated into distance matrices.
+
+For instance, we could make a matrix of some chemical variables, from 5m and compare them to the distances in community structure.
+
+```{r}
+arisa_community3
+```
+
+First of all, lets take just enviornmental samples for which we have corresponding community data
+
+```{r}
+env01 <- env00 %>% 
+  mutate(sampleID = paste(as.character(date_local), depth_n, sep = "_"))
+
+env02 <- env01 %>%
+  filter(sampleID %in% arisa_community3$sampleID)
+```
+
+```{r}
+dim(arisa_community3)
+dim(env02)
+```
+
+## Debugging aside:
+
+So env02 has a duplicate date in in and that's why its longer. Super annoying.
+
+```{r}
+env02 %>% 
+  group_by(sampleID) %>%
+  summarise(n = n()) %>%
+  arrange(-n) %>%
+  head()
+```
+
+Its 2006-10-15_5
+
+```{r}
+env02 %>%
+  filter(sampleID == "2006-10-15_5")
+```
+
+The first instance has more data. It also has a cruise ID, lets use it.
+
+```{r}
+env03 <- env02 %>%
+  filter(sampleID != "2006-10-15_5" | !is.na(cruise_id))
+dim(env03)
+```
+
+## Lets make a distance matrix of chemical measurments at 5m
+
+```{r}
+env_5m <- env03 %>% filter(depth_n == "5")
+chem_5m <- env_5m %>%
+  # Just keep the date, as an identifier, and the chemistry data from last lesson
+  select(date_local, temp, sal, PO4, NO3_NO2, NO2, SiO3) %>% # Not related
+  #select(date_local, Chl_A_Sat, Prim_Prod, POC) %>%
+  # Impute missing values with medians
+  mutate_all(~replace(., is.na(.), median(., na.rm = TRUE))) %>%
+  # Make the date into a character vector
+  mutate(date_local = as.character(date_local)) %>%
+  column_to_rownames("date_local")
+
+# Here' I'm scaling the chemical distance matrix, so the variables all have a mean of zero and standard deviation of one.
+chem_5m_scaled <- scale(chem_5m)
+
+chem_5m_distance <- vegdist(chem_5m_scaled, method = "euclidian")
+```
+
+```{r}
+chem_5m_mds <- metaMDS(chem_5m_distance) 
+plot(chem_5m_mds)
+```
+Boy is that one strange looking outlier.
+
+```{r}
+
+chem_5m_rat <- chem_5m_mds %>% scores %>% as.data.frame() %>% rownames_to_column("date_local") %>% 
+  mutate(date_local = as.Date(date_local)) %>%
+  right_join(env_5m, by = "date_local")
+
+chem_5m_rat %>%
+  ggplot(aes(x = NMDS1, y = NMDS2, col = day_length)) +
+  geom_point() +
+  scale_color_viridis_c(name = "DL")
+
+chem_5m_rat %>%
+  ggplot(aes(x = NMDS1, y = NMDS2, col = day_length_change_per_month)) +
+  geom_point() +
+  scale_color_viridis_c(name = "DDL")
+
+chem_5m_rat %>%
+  ggplot(aes(x = NMDS1, y = NMDS2, col = as.factor(year))) +
+  geom_point() +
+  scale_color_viridis_d(name = "year")
+```
+**Question:** When was the outlying data point collected? What does it mean that its outlying?
+
+That outlying point is going to screw up any sort of mantel test, so we'll use a non-parametric version.
+
+# Mantel test
+We're going to essentially see if the distance matrix arisa_5m_robust_aitchinson is correlated with chem_5m_distance
+First, distance matrices have to be in the same order to do the mantel test. Lets check
+
+```{r}
+tibble(labels(arisa_5m_robust_aitchinson),
+labels(chem_5m_distance))
+```
+Looks good.
+
+Actual test
+```{r}
+mantel(arisa_5m_robust_aitchinson, chem_5m_distance, method = "spear")
+```
+
+And here we see that "chemistry" is not correlated, per-se with the community structure.
+
+What about the time of the year?
+
+```{r}
+time_stuff <- env_5m %>%
+  # Just keep the date, as an identifier, and the chemistry data from last lesson
+  select(date_local, year, day_length, day_length_change_per_month) %>%
+  # Impute missing values with medians
+  mutate_all(~replace(., is.na(.), median(., na.rm = TRUE))) %>%
+  # Make the date into a character vector
+  mutate(date_local = as.character(date_local)) %>%
+  column_to_rownames("date_local") %>%
+  scale()
+
+time_distance <- vegdist(time_stuff, method = "euclid")
+```
+
+Quick look at this new distance matrix
+```{r}
+time_rat <- time_distance %>%
+  metaMDS() %>%
+  scores() %>%
+  as.data.frame() %>% rownames_to_column("date_local") %>% 
+  mutate(date_local = as.Date(date_local)) %>%
+  right_join(env_5m, by = "date_local")
+
+time_rat %>%
+  ggplot(aes(x = NMDS1, y = NMDS2, col = day_length)) +
+  geom_point() +
+  scale_color_viridis_c(name = "DL")
+
+time_rat %>%
+  ggplot(aes(x = NMDS1, y = NMDS2, col = day_length_change_per_month)) +
+  geom_point() +
+  scale_color_viridis_c(name = "DDL")
+
+time_rat %>%
+  ggplot(aes(x = NMDS1, y = NMDS2, col = as.factor(year))) +
+  geom_point() +
+  scale_color_viridis_d(name = "year")
+  
+```
+
+```{r}
+mantel(arisa_5m_robust_aitchinson, time_distance)
+```
+
+So the biology is very associated with time.
+
+```{r}
+mantel(chem_5m_distance, time_distance)
+```
+
+So is the chemistry!
+
+
+## What about the satelite data from Cram
+
+```{r}
+sat_5m <- env_5m %>%
+  # Just keep the date, as an identifier, and the chemistry data from last lesson
+  #select(date_local, temp, sal, PO4, NO3_NO2, NO2, SiO3) %>% # Not related
+  select(date_local, Chl_A_Sat, Prim_Prod, POC) %>%
+  # Impute missing values with medians
+  mutate_all(~replace(., is.na(.), median(., na.rm = TRUE))) %>%
+  # Make the date into a character vector
+  mutate(date_local = as.character(date_local)) %>%
+  column_to_rownames("date_local")
+
+# Here' I'm scaling the chemical distance matrix, so the variables all have a mean of zero and standard deviation of one.
+sat_5m_scaled <- scale(sat_5m)
+
+sat_5m_distance <- vegdist(sat_5m_scaled, method = "euclidian")
+sat_5m_mds <- metaMDS(sat_5m_distance) 
+sat_5m_rat <- sat_5m_mds %>% scores() %>%
+  as.data.frame() %>% rownames_to_column("date_local") %>% 
+  mutate(date_local = as.Date(date_local)) %>%
+  right_join(env_5m, by = "date_local")
+
+sat_5m_rat %>%
+  ggplot(aes(x = NMDS1, y = NMDS2, col = day_length)) +
+  geom_point() +
+  scale_color_viridis_c(name = "DL")
+
+sat_5m_rat %>%
+  ggplot(aes(x = NMDS1, y = NMDS2, col = day_length_change_per_month)) +
+  geom_point() +
+  scale_color_viridis_c(name = "DDL")
+
+sat_5m_rat %>%
+  ggplot(aes(x = NMDS1, y = NMDS2, col = as.factor(year))) +
+  geom_point() +
+  scale_color_viridis_d(name = "year")
+```
+One thing I don't like is that I'm copying text a lot. I should make things into a function and not have to re-do so much coding. But I'm running out of time and intellectual band-width so this file is going to be a thousand lines long. Thanks for your patience.
+
+
+```{r}
+mantel(arisa_5m_robust_aitchinson, sat_5m_distance, method = "spearman")
+```
+
+**Question** Which are more closely related to microbial community structure, the satellite measurments, or the chemistry ones?
+
+*Task:*
+What if we did this for just one satellite measurement. Pick one and make a distance matrix of just that one variable. Compare it to the `arisa_5m_robust_aitchinson` distance matrix.
+
+# Partial mantel test
+Ok so the last thing are partial mantel tests. In which case we can see if a distance matrix is related to another, factoring out a third.
+
+```{r}
+mantel.partial(arisa_5m_robust_aitchinson, sat_5m_distance, time_distance, method = "spearman")
+```
+
+**Task.** Do a partial mantel test, seeing if the chemistry explains community structure, factoring out time factors.

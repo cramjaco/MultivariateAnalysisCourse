@@ -1,13 +1,19 @@
 ---
-title: "Linear Regression"
+title: "Linear regression of high dimensional data"
 author: "Jacob Cram"
 format: html
 editor: visual
 ---
 
+# Group Details
+
+Please write the names of everyone in your group here:
+
+If you are feeling creative, put a name for your group here:
+
 # Preamble
 
-Odds are, you've used linear regression to see how a few variables predict some other variable. If you want to really dive into these, consider taking a normal people statistics class.
+Odds are, if you've made it to this class, at some point you've used linear regression to see how a few variables predict some other variable. If you want to really dive into these, consider taking a normal people statistics class.
 
 I also strongly advocate for reading James, Witten, Hastie, Tibshirani's An Introduction to Statistical Learning, Second Edition, Chapter 1. Which provides a lot of helpful perspective.
 
@@ -33,26 +39,30 @@ options(bitmapType="cairo")
 set.seed(10033)
 ```
 
-For our example today, I want the relative abundances of some phylum level groups, and some chemistry data.
+For our example today, I want the relative abundances of some phylum level bacterial taxa groups, and some chemistry data.
 
 ## Bringing in and processing the data
 
-A whole bunch of steps, mostly data wrangling, which is not the focus here.
+In this section I do whole bunch of steps, mostly data wrangling, which is not the focus here.
 
 ### Note on CLR transformation
 
-I do a centered log-ratio (CLR\_ transformation on the microbial data, which is necessary for "relative abundance" data typical of microbes. See this excelent paper for why I need to do this.
+As part of these steps, I do a centered log-ratio (CLR) transformation on the microbial data, which is a recommended transformation for "relative abundance" data typical of microbes. See this excellent paper for why I need to do this.
 
 Gloor, G.B., Macklaim, J.M., Pawlowsky-Glahn, V., and Egozcue, J.J. (2017). Microbiome Datasets Are Compositional: And This Is Not Optional. Front. Microbiol. *8*. [10.3389/fmicb.2017.02224](https://doi.org/10.3389/fmicb.2017.02224).
 
-Per Gloor et al. 2017, your data are compositional if their total value is an arbitrary data imposed by the measurment instrument. In the case of microorganims data, my total values are "relative abundance". They sum to one because I told them too, which doesn't reflect the environment.
+Per Gloor et al. 2017, your data are compositional if their total value is an arbitrary data imposed by the measurement instrument. In the case of microorganism data, my total values are "relative abundance". They sum to one because I told them too, which doesn't reflect the environment. Even if one sample has ten times more bacteria than another, the sum of the relative abundance data will still be one in both samples.
 
-If I had somehow measured microbes not in % of total community but in cells/L (the focus of my current research), my data would not be compositional.
+If I had left my data in some unit like total counts (typical of amplicon sequencing data) or amplicon total peak area (the values from the instrument that produced these data), while the totals might differ between samples, they don't have anything to do with nature, and so are un-usable. A CLR tranform would still be required.
 
-If your data are "compositional" you need to do this transformation, and if they are not, you don't.
+If I had somehow measured microbes not in % of total community but in cells/L (the focus of my current research), my data would not be compositional. I'd still probably want to normalize the data, such as by log transforming them, but wouldn't need to CLR transform.
+
+In summary, if your data are "compositional" you need to do this transformation, and if they are not, you don't.
+
+## Actual data wrangling steps
 
 ```{r}
-# Biologicla Data
+## Biological Data
 bio00 <- read_csv(here("Data", "arisa_latlon_sort_vess_bio.csv"), na = "nd")
 arisa_fragments <- bio00 %>%
   select(date_local, depth_n, arisa_frag, rel_abund)
@@ -60,7 +70,7 @@ arisa_fragments <- bio00 %>%
 arisa_fragments_surface <- arisa_fragments %>%
   filter(depth_n == "5")
 
-# Taxonomic information
+## Taxonomic information
 tax00 <- read_csv(here("Data", "bins_taxonomy.csv"), na = "nd")
 
 tax00_surface <- tax00 %>%
@@ -72,6 +82,8 @@ tax00_surface <- tax00 %>%
   mutate(arisa_frag = str_remove(nodeIDs,"^[^_]*_")) %>%
   # just select the arisa_frag column and the primary Domain through genus level IDs for each fragment
   select(arisa_frag, Domain:Genus)
+
+## Combined biological and taxonomic information
 
 # stick the taxonomy information on to the arisa_fragments informaion
 # everything henseforth is only from the surface
@@ -86,9 +98,8 @@ phyla_df <- biotax %>%
   summarise(rel_abund = sum(rel_abund), .groups = "keep") %>%
   ungroup()
 
-# We shouldn't do stats on data that are bounded between zero and one for reasons. We need to centered log-ratio (CLR) transform the data, which we will discuss eventually. But for now, check out the steps.
-
-# In the CLR transformation we 
+## CLR Transformation
+# We shouldn't do stats on data that are bounded between zero and one for reasons (described above). We need to centered log-ratio (CLR) transform the data, which we will discuss eventually. But for now, check out the steps.
 
 # Make sure there are no zeros by adding a small adjustment factor to everything.
 mra <- phyla_df %>% 
@@ -110,7 +121,8 @@ phyla_clr <- phyla_df %>%
   mutate(clr = log(rel_abund_nudge/geometric_mean)) %>%
   select(-c(rel_abund_nudge, geometric_mean))
 
-# Reshaping -- see the data wrangling lesson
+## Reshaping 
+# -- see the data wrangling lesson
 phyla_wide <- phyla_clr %>%
   select(-rel_abund) %>% # discard the relative abundance info, we are just going to work with clr data
   pivot_wider(names_from = Phylum2, values_from = clr)
@@ -175,9 +187,29 @@ This table nice because it has our coefficients, t-value and p-values. It of cou
 
 So. We discovered that alpha-proteobacteria are not particularly related in their abundance to temperature. But why limit ourselves to alpha-proteobacteria? Why not try all of the phyla?
 
-Many students will do something like do the above analysis like 20 times, once for each phylum. This becomes a problem if you want to later change anything about your analysis. You'd have to do that to everything. Also its a lot of typing or else copy pasting. What I like to do instead is keep track of things using the `purrr` package and its `map` functions.
+Many students will do something like perform the above analysis 20 times, once for each phylum. That approach becomes a problem if you want to later change anything about your analysis. You'd have to do that to everything. Also its a lot of typing or else copy pasting. What I like to do instead is keep track of things using the `purrr` package and its `map` functions.
 
-First things first though. Data wrangling. I'm combining the temperature data and thy phyla data into one big table. I'm also throwing out missing values.
+## Looking at phyla data
+
+First things first, lets look at the phylum level data. Both as relative abundances and as CLR transformed data.
+
+```{r fig.height=8, fig.width = 4}
+phyla_clr %>%
+  pivot_longer(rel_abund:clr, names_to = "measurement_type", values_to = "value") %>%
+  ggplot(aes(x = value)) + geom_histogram() + 
+  facet_grid(Phylum2 ~ measurement_type, scales = "free_x") +
+  theme(strip.text.y = element_text(size = 6))
+```
+
+You can also see what the CLR transform does to these values with these histograms.
+
+**Question:** Which phylum tends to has the highest relative abundance?
+
+**Question:** Describe in your own words, how the data look different after the CLR transformation step.
+
+## More data wrangling
+
+First things first though. Even more data wrangling. I'm combining the temperature data and the phyla data into one big table. I'm also throwing out missing values.
 
 ```{r}
 temp_df <- env_5m_b %>% select(date_local, temp)
@@ -198,9 +230,9 @@ phyla_temp_nested <- phyla_temp %>%
 
 The easiest way to look at this is to open it up and click on each data frame.
 
-**Question:** Describe how this nested data frame is structured, in your own words. In particular, what is going on in the `data` column.
+**Question:** Describe how this nested data frame `phyla_temp_nested` is structured, in your own words. In particular, what is going on in the `data` column.
 
-Now we can apply operations to each of the nested data frames
+Now we can apply operations to each of the nested data frames. Note the use of `map()` which allows us to apply an operation to every element of the `data` column.
 
 ```{r}
 phyla_temp_analysis_1 <- phyla_temp_nested %>%
@@ -210,8 +242,7 @@ phyla_temp_analysis_1 <- phyla_temp_nested %>%
 
 **Question:** What is going on in the mod column?
 
-Hint: Try running `phyla_temp_analysis_1$mod[[1]]` `phyla_temp_analysis_1$mod[[2]]` `phyla_temp_analysis_1$mod[[2]] %>% summary()` and things of that nature in the console.
-
+Hint: Try running `phyla_temp_analysis_1$mod[[1]]`, `phyla_temp_analysis_1$mod[[2]]`, `phyla_temp_analysis_1$mod[[2]] %>% summary()`, and things of that nature in the console.
 
 ```{r}
 phyla_temp_analysis_2 <- phyla_temp_analysis_1 %>%
@@ -230,10 +261,9 @@ phyla_temp_analysis_unnested_1 <- phyla_temp_analysis_2 %>%
 
 **Question:** What did `unnest(results)` do?
 
-This dat frame has a bunch of coefficients for the slope and intercept of the relationship between each phylum and temperature.
-We kind of don't care about the intercepts though, and the p values are hard to read as wrritten.
+This data frame has a bunch of coefficients for the slope and intercept of the relationship between each phylum and temperature. We kind of don't care about the intercepts though, and the *p*-values are hard to read as written.
 
-First, lets just keep the `temp`erature terms.
+First, lets just keep the `temp`erature terms, dicarding the `(Intercept)` terms.
 
 ```{r}
 phyla_temp_analysis_unnested_2 <- phyla_temp_analysis_unnested_1 %>%
@@ -252,11 +282,12 @@ phyla_temp_analysis_unnested_2 %>%
   flextable() %>%
   bold(i = ~p < 0.05, j = "p")
 ```
-*Task:* Check out the flextable documentation and make a new table that looks different, perhaps even better, than the one above.
+
+*Task:* Check out the `flextable` or `format` documentation and make a new table that looks different, perhaps even better, than the one above.
 
 ## False discovery rate corrections.
 
-Ok, so now it looks like maybe "Bacteroidetes" and "Gammaproteobacteria" are related to temperature. They certainly have a p values less than 0.05, which is promising. However, there's a big caveat here. We've done ten statistical tests. If you do enough statistical tests, you are likely to get some false positives, even on random data.
+Ok, so now it looks like maybe "Bacteroidetes" and "Gammaproteobacteria" are related to temperature. They certainly have *p*-values less than 0.05, which is promising. However, there's a big caveat here. We've done ten statistical tests. If you do enough statistical tests, you are likely to get some false positives, even on random data.
 
 For instance, lets shuffle the order of the clr values and try again
 
@@ -290,7 +321,7 @@ phyla_temp_shuffled %>%
   bold(i = ~p < 0.05, j = "p")
 ```
 
-Ok, bad example. These actually look worse than the non-shuffled data, which is promising. We want things to look worse when we shuffle the data. If we shuffle 100 times, we can actually use that as a way of testing whether things look sane.
+Ok, bad example. These actually look worse than the non-shuffled data, which is a good thing. We want things to look worse when we shuffle the data. If we were to shuffle 100 times, we can actually use that as a way of testing whether things look sane. One common question is how often do shuffled data give you better results than your normal data. I'm not going to run that test here though, because I don't feel like it.
 
 We can also do some analysis with random numbers to see false positives.
 
@@ -325,11 +356,11 @@ random_data %>%
 
 **Question:** What is going on in the data frame called `random_data`.
 
-**Question:** What did I do to `random_data` to get the output above?
+**Question:** What did I do to `random_data` to get the nice-ish looking table above?
 
 You can see that with this random data and 25 rather than 10 phyla, we have two that look statistically significant. That can't be real, we are using just random numbers. So we want to adjust for this randomness, and one way to do this is with false discovery rates.
 
-The false discovery rate (FDR) asks not how likely any one value is to be a false positive, but rather what the likely fraction of false positives likely is in your dataset. So if you have an FDR of 5%, of the things that make that cutoff, about 5% of them are likely to have emerged by random chance. Fortunately FDR is really easy to calculate.
+The false discovery rate (FDR) asks not how likely any one value is to be a false positive, but rather what the likely fraction of false positives is in your data set. So if you have an FDR of 5%, of the things that make that cutoff, about 5% of them are likely to have emerged by random chance. Fortunately FDR is really easy to calculate.
 
 ```{r}
 # Funtion that makes an pretty flextable form an appropriately formatted data frame. Usfull if I want to do this more than once, or don't want to mudy the waters where I do the actual work.
@@ -348,31 +379,32 @@ make_pretty_table <- function(df){
 # The actual work
 phyla_temp_analysis_unnested_2 %>%
   ungroup() %>% # left over grouping form before can screw things up, so I ungroup
-  mutate(fdr = p.adjust(p.value, method = "BH")) %>% # Just one line of code to calculate FDR values.
+  mutate(fdr = p.adjust(p.value, method = "BH")) %>% # **FDR calculation happens here!**
   make_pretty_table() # then I reformat into a pretty flextable using the function above.
 
 # if the fdr values are the same as the input values, its because the input data-frame is still grouped
-# I had this problem when I wrote the code.
+# I had this problem when I first wrote the code.
 ```
 
 *Questions:* What does `method = "BH"` do? What are other options for method? What happens if you change the method to something else?
 
-So now we see that it is likely that more than 5% of our so-called positives are likely false positives. Sometimes though, people pick false discovery rate cutoffs that are larter than 5%. In one of my papers I used 20%. Which is to say, here are a bunch of results, I think at least 80% of them are true and the rest are probably false. I don't have enough information to say which are which at this point.
+So now we see that it is likely that more than 5% of our so-called positives are likely false positives. Sometimes though, people pick false discovery rate cutoffs that are larger than 5%. In one of my papers I used 20%. Which is to say, here are a bunch of results, I think at least 80% of them are true and the rest are probably false. I don't have enough information to say which are which at this point.
 
-*Task:* Make a new flextable where you italisize all of the false discovery rates that are smaller than 20% and format them as percentages, rather than numbers.
+*Task:* Make a new flextable where you italicize all of the false discovery rates that are smaller than 20%. Also, format them as percentages, rather than numbers.
 
 *Task:* Write a caption for your table, beginning with the words "Table 1."
 
 *Task:* Write a few sentences that might go in a methods section about how you tested which taxa are related to temperature.
 
-*Task:* Write a few sentences that might go in a results section describing what you know about which phyla are relted to temperature. Please include the words "(Table 1)".
+*Task:* Write a few sentences that might go in a results section describing what you know about which phyla are related to temperature. Please include the words "(Table 1)".
 
 # Many X
 
-So you are likely more accustomed to the situation where you want to see how a single dependent variable, say `Gammaproteobacteria` abundance, relates to the abundance a bunch of independent variables, say enviornmental predictors. The `lm` function makes this pretty easy.
+So you are likely more accustomed to the situation where you want to see how a single dependent variable, say `Gammaproteobacteria` abundance, relates to the abundance a bunch of independent variables, say environmental predictors. The `lm` function makes this pretty easy.
 
 ## Challenge of missing data
-However, when you are working with environmental data odds are a bunch of them are missing. Eg, some sample got dropped, or a sensor didn't work one day or two. At this point it becomes very dubious to just discard samples with missing data, both for reasons of statistical power, and for reasons of doing good statistics in general Serious statisticians have a variety of methods for handeling missing data. One important consideration is whether your data are missing at random. If for instance you can't ever measure nutrients in the ocean when the waves are over 3 m tall (your boat would sink), you data might be missing not at random. 
+
+However, when you are working with environmental data odds are a bunch of them are missing. Eg, some sample got dropped, or a sensor didn't work one day or two. At this point it becomes very dubious to just discard samples with missing data, both for reasons of statistical power, and for reasons of doing good statistics in general Serious statisticians have a variety of methods for handeling missing data. One important consideration is whether your data are missing at random. If for instance you can't ever measure nutrients in the ocean when the waves are over 3 m tall (your boat would sink), you data might be missing not at random.
 
 We aren't going to go into the statistics of missing data in this class, but definately they are something worth reading about and exploring, especially if you have a bunch of missing data.
 
@@ -382,13 +414,26 @@ I don't wan't to do that here, so we'll do some median imputation for now.
 
 ## Data wrangling
 
-Lets combine the gammaproteobacteria data with the selected enviornmental data
+Lets make a small data-frame wiht just gamma proteobacteraia and the selected enviornmental data
 
 ```{r}
 gamma_env <- phyla_env %>% select(Gammaproteobacteria, temp:SiO3)
 ```
 
+Lets visualize the data
+
+```{r}
+gamma_env %>%
+  pivot_longer(cols = everything(), names_to = "measurement", values_to = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~measurement, scales="free_x", nrow = 2)
+```
+
+One might consider log-transforming some of these, especially NO3_NO2. I'm not going to today, consider that a caviat.
+
 Looking at missing data patterns
+
 ```{r}
 gamma_env %>% nrow()
 gamma_env %>% filter(!is.na(Gammaproteobacteria)) %>% nrow()
@@ -399,13 +444,15 @@ gamma_env %>% na.omit() %>% nrow()
 **Task:** Please comment the above code chunk to describe what each line is checking?
 
 Below I'm mostly just checking how many missing values are in each column
+
 ```{r}
 summary(gamma_env)
 ```
+
 SiO3 is clearly missing a lot of the time.
 
-Now I'm going to just take the rows where there are gamma-proteobacteria and at least one environmental column with data.
-Then I'm going to impute the missing values with medians
+Now I'm going to just take the rows where there are gamma-proteobacteria and at least one environmental column with data. Then I'm going to impute the missing values with medians
+
 ```{r}
 gamma_env_hasdata <- gamma_env %>%
   filter(!is.na(Gammaproteobacteria)) %>%
@@ -416,6 +463,7 @@ gamma_env_impute <- gamma_env_hasdata %>%
 ```
 
 Then I run a linear regression on the imputed data.
+
 ```{r}
 gamma_mod <- lm(Gammaproteobacteria ~ . ,data = gamma_env_impute) # "." means everything
 summary(gamma_mod)
@@ -423,12 +471,13 @@ summary(gamma_mod)
 
 **Question:** What can you say about the environmental correlates of Gammaproteobacterial relative abundance?
 
-**Question:** How might the missing values be affecting this analysis?
+**Question:** How might the missing (imputed) values be affecting this analysis?
 
 # Putting it all together
+
 We can of course do multi-x and multi-y regression with stuff we have so far.
 
-First lets get rid of rows missing species data, and rows missing environenttal data
+First lets get rid of rows missing species data, and rows missing environmental data
 
 ```{r}
 phyla_env_hasdata <- phyla_env %>%
@@ -444,7 +493,7 @@ phyla_env_imputed <- phyla_env_hasdata %>%
   mutate_if(is.numeric, ~replace(., is.na(.), median(., na.rm = TRUE)))
 ```
 
-Pivot just the phyla longer, but not the environmental data
+Pivot just the phyla measurments longer, but not the environmental data
 
 ```{r}
 phyla_env_long <- phyla_env_imputed %>%
@@ -452,6 +501,7 @@ phyla_env_long <- phyla_env_imputed %>%
 ```
 
 Nest the data
+
 ```{r}
 phyla_env_nested <- phyla_env_long %>%
   select(-date_local) %>% # not used in the analyis so discarded
@@ -472,7 +522,6 @@ phyla_env_model_unnest <- phyla_env_models %>%
   unnest(tidied_mod)
 phyla_env_model_unnest
 ```
-
 
 ```{r}
 phyla_env_model_output <- phyla_env_model_unnest %>%
@@ -503,4 +552,6 @@ phyla_env_model_output %>%
 
 **Question:** How would you describe the patterns shown in this table?
 
+**\# Task:** Make a plot to more easily visualize the data in the table.
 
+**Question:** What would you do if you wanted to look at the relationship between 20 most abundant species (rather than phyla), and the chemical parameters.

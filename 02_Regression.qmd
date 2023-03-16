@@ -212,7 +212,6 @@ phyla_temp_analysis_1 <- phyla_temp_nested %>%
 
 Hint: Try running `phyla_temp_analysis_1$mod[[1]]` `phyla_temp_analysis_1$mod[[2]]` `phyla_temp_analysis_1$mod[[2]] %>% summary()` and things of that nature in the console.
 
-
 ```{r}
 phyla_temp_analysis_2 <- phyla_temp_analysis_1 %>%
   # do the linear models
@@ -230,8 +229,7 @@ phyla_temp_analysis_unnested_1 <- phyla_temp_analysis_2 %>%
 
 **Question:** What did `unnest(results)` do?
 
-This dat frame has a bunch of coefficients for the slope and intercept of the relationship between each phylum and temperature.
-We kind of don't care about the intercepts though, and the p values are hard to read as wrritten.
+This dat frame has a bunch of coefficients for the slope and intercept of the relationship between each phylum and temperature. We kind of don't care about the intercepts though, and the p values are hard to read as wrritten.
 
 First, lets just keep the `temp`erature terms.
 
@@ -252,6 +250,7 @@ phyla_temp_analysis_unnested_2 %>%
   flextable() %>%
   bold(i = ~p < 0.05, j = "p")
 ```
+
 *Task:* Check out the flextable documentation and make a new table that looks different, perhaps even better, than the one above.
 
 ## False discovery rate corrections.
@@ -372,7 +371,8 @@ So now we see that it is likely that more than 5% of our so-called positives are
 So you are likely more accustomed to the situation where you want to see how a single dependent variable, say `Gammaproteobacteria` abundance, relates to the abundance a bunch of independent variables, say enviornmental predictors. The `lm` function makes this pretty easy.
 
 ## Challenge of missing data
-However, when you are working with environmental data odds are a bunch of them are missing. Eg, some sample got dropped, or a sensor didn't work one day or two. At this point it becomes very dubious to just discard samples with missing data, both for reasons of statistical power, and for reasons of doing good statistics in general Serious statisticians have a variety of methods for handeling missing data. One important consideration is whether your data are missing at random. If for instance you can't ever measure nutrients in the ocean when the waves are over 3 m tall (your boat would sink), you data might be missing not at random. 
+
+However, when you are working with environmental data odds are a bunch of them are missing. Eg, some sample got dropped, or a sensor didn't work one day or two. At this point it becomes very dubious to just discard samples with missing data, both for reasons of statistical power, and for reasons of doing good statistics in general Serious statisticians have a variety of methods for handeling missing data. One important consideration is whether your data are missing at random. If for instance you can't ever measure nutrients in the ocean when the waves are over 3 m tall (your boat would sink), you data might be missing not at random.
 
 We aren't going to go into the statistics of missing data in this class, but definately they are something worth reading about and exploring, especially if you have a bunch of missing data.
 
@@ -389,6 +389,7 @@ gamma_env <- phyla_env %>% select(Gammaproteobacteria, temp:SiO3)
 ```
 
 Looking at missing data patterns
+
 ```{r}
 gamma_env %>% nrow()
 gamma_env %>% filter(!is.na(Gammaproteobacteria)) %>% nrow()
@@ -399,13 +400,15 @@ gamma_env %>% na.omit() %>% nrow()
 **Task:** Please comment the above code chunk to describe what each line is checking?
 
 Below I'm mostly just checking how many missing values are in each column
+
 ```{r}
 summary(gamma_env)
 ```
+
 SiO3 is clearly missing a lot of the time.
 
-Now I'm going to just take the rows where there are gamma-proteobacteria and at least one environmental column with data.
-Then I'm going to impute the missing values with medians
+Now I'm going to just take the rows where there are gamma-proteobacteria and at least one environmental column with data. Then I'm going to impute the missing values with medians
+
 ```{r}
 gamma_env_hasdata <- gamma_env %>%
   filter(!is.na(Gammaproteobacteria)) %>%
@@ -416,6 +419,7 @@ gamma_env_impute <- gamma_env_hasdata %>%
 ```
 
 Then I run a linear regression on the imputed data.
+
 ```{r}
 gamma_mod <- lm(Gammaproteobacteria ~ . ,data = gamma_env_impute) # "." means everything
 summary(gamma_mod)
@@ -426,6 +430,7 @@ summary(gamma_mod)
 **Question:** How might the missing values be affecting this analysis?
 
 # Putting it all together
+
 We can of course do multi-x and multi-y regression with stuff we have so far.
 
 First lets get rid of rows missing species data, and rows missing environenttal data
@@ -452,6 +457,7 @@ phyla_env_long <- phyla_env_imputed %>%
 ```
 
 Nest the data
+
 ```{r}
 phyla_env_nested <- phyla_env_long %>%
   select(-date_local) %>% # not used in the analyis so discarded
@@ -472,7 +478,6 @@ phyla_env_model_unnest <- phyla_env_models %>%
   unnest(tidied_mod)
 phyla_env_model_unnest
 ```
-
 
 ```{r}
 phyla_env_model_output <- phyla_env_model_unnest %>%
@@ -502,5 +507,3 @@ phyla_env_model_output %>%
 **Question:** What is the difference between fdr_ungrouped and fdr? Specifically (A) How are they differently calculated? (B) What are the differences in their patterns?
 
 **Question:** How would you describe the patterns shown in this table?
-
-

@@ -9,6 +9,16 @@ editor: visual
 
 In the last lesson we focued on relationships between a few variables at a time. But sometimes we want to know about trends that unfold across many many variables. One approach is to look at similarity between samples.
 
+Also this video, by Pat Schloss does a nice job of describing stuff.
+
+Distance matrices https://www.youtube.com/watch?v=xyufizOpc5I
+
+Non metric multidimensional scaling https://www.youtube.com/watch?v=h7OrVmT7Ja8
+
+Mantel Tests
+
+https://www.youtube.com/watch?v=EXNOgmUyPfY
+
 # Loading in data
 
 Lets get some community structure data ready so we can use it
@@ -106,7 +116,7 @@ Ok. So again, we're trying to calculate a distance matrix with vegdist. However,
 class(arisa_community2)
 ```
 
-And we've got a \`data.frame\`.
+And we've got a `data.frame`.
 
 We can transmogrify this into a matrix, but matrices have to have all of the columns of the same type (eg numbers or characters) and our table has the first two rows as characters. We can fix this by using them as the "names" for the matrix.
 
@@ -148,6 +158,7 @@ source(here("Libraries", "jacob_functions.R"))
 ```
 
 I borrowed a package online for looking at them
+
 ```{r}
 coldiss(arisa_euclid)
 ```
@@ -159,7 +170,8 @@ coldiss(arisa_bray)
 ```
 
 # Multidimensional scaling
-Multidimensional scaling is one way to look at distance objects.
+
+Multidimensional scaling is one way to look at distance objects. There is a metric multidimensional scaling approach (often called Principal Coordinates Analysis PCOA) and a non-metric approach (NMDS). We will focus on the non-metric approach, which is implemented in vegan's `metaMDS` function.
 
 ```{r}
 arisa_euclid_mds <- metaMDS(arisa_euclid)
@@ -167,13 +179,43 @@ arisa_bray_mds <- metaMDS(arisa_bray)
 arisa_robust_aitchinson_mds <- metaMDS(arisa_robust_aitchinson)
 ```
 
-*Question:* What are these 20 runs that it is doing for every caclulation?
+Please notice that the MDS each iterate through 20 runs. That's because non-metric multidimensional scaling is an iterative process. I looked for a good resource online, but frankly couldn't find anything as succinct and close to my actual understanding as chatGPT gave me, which was as follows:
+
+### ChatGPT on NMDS
+
+> Non-metric multidimensional scaling (NMDS) is a technique used in statistics to analyze similarity or dissimilarity data by reducing the dimensionality of the data while preserving the similarities and differences between objects or samples.
+
+> The basic idea of NMDS is to transform a set of dissimilarities (e.g., distances or similarities) into a set of distances in a low-dimensional space. This transformation allows the data to be visualized and analyzed in a way that reveals underlying patterns and relationships.
+>
+> The NMDS algorithm involves the following steps:
+>
+> 1.  Calculate a dissimilarity matrix that represents the differences between each pair of objects or samples in the data set.
+>
+> 2.  Choose a number of dimensions (usually 2 or 3) for the low-dimensional space in which to represent the data.
+>
+> 3.  Randomly initialize the positions of the objects or samples in the low-dimensional space.
+>
+> 4.  Calculate the stress value, which measures the degree of discrepancy between the distances in the original dissimilarity matrix and the distances in the low-dimensional space.
+>
+> 5.  Adjust the positions of the objects or samples in the low-dimensional space to minimize the stress value.
+
+> 6.  Repeat steps 4 and 5 until the stress value converges to a stable value.
+>
+> The resulting plot in the low-dimensional space can be used to identify clusters of objects or samples that are similar to each other, and to identify relationships between objects or samples that may not be immediately apparent in the original data.
+>
+> NMDS is a useful technique for analyzing a wide range of data types, including ecological, biological, and social data. It is particularly useful for analyzing data sets that contain many variables or that are not normally distributed, as it does not assume any particular distribution of the data.
+
+### Back to not, chat GPT
+
+I'll add that the values that its giving you are "stress" scores, which are measures of the differences between how the actual literal distances in the 2d plot are different from the distances in the multidimensional space represented by the distance matrix. The algorithm tries to minimize this stress so the show distances are as close to the true distances as possible. However, stress is never zero, so there is always some distortion. It also means that your results are different from run to run.
+
+**Task:** Try allowing it to run more iterations. Can you get a lower stress value than you did in 20 iterations?
+
+We can get a basic plot of the nmds scores with the plot command.
 
 ```{r}
 plot(arisa_euclid_mds)
 ```
-
-We can do similar analyses
 
 ```{r}
 plot(arisa_bray_mds)
@@ -183,24 +225,28 @@ plot(arisa_bray_mds)
 plot(arisa_robust_aitchinson_mds)
 ```
 
-*Question:* What can you say so far about the differences in patterns.
+*Question:* What can you say so far about the differences in patterns between the four different distance approaches
 
 ## Color coded Multidimensional scaling plots
-Of course, it would be nice to have some information about the samples too.
+
+Of course, it would be nice to have some information about the samples too. I usually do this by color coding, shape coding, or otherwise modifying how the points look.
 
 Lets focus on the robust aitchinson mds results.
 
+Color-coding the points involves mostly a bunch of data wrangling. Here I pull the "scores", which are the positions of the points on the plot, and format them into a nice looking data frame.
 
-This is mostly a matter of data wrangling.
 ```{r}
-arisa_robust_aitchinson_mds_scores <- arisa_robust_aitchinson_mds %>% scores(display = "sites") %>% as.data.frame() %>% rownames_to_column("SampleID") %>%
+arisa_robust_aitchinson_mds_scores <- arisa_robust_aitchinson_mds %>%
+  scores(display = "sites") %>%
+  as.data.frame() %>%
+  rownames_to_column("SampleID") %>%
   separate(SampleID, into = c("date_local", "depth_n"), sep = "_") %>%
   mutate(date_local = as.Date(date_local)) %>%
   identity()
 arisa_robust_aitchinson_mds_scores
 ```
 
-**Question:** What does the `scores` function (above) do?
+**Task:** Please add comments to the above code describing what each step does in plain language.
 
 Then we can append the nmds scores to the env00 data frame Now we can plot stuff.
 
@@ -211,6 +257,10 @@ env_rat <- env00 %>%
   left_join(arisa_robust_aitchinson_mds_scores, by = c("date_local", "depth_n")) %>%
   mutate(depth_n = factor(depth_n, levels = depths_in_order)) # I'm mkaing depth_n a factor so its in order
 ```
+
+**Task:** Please add comments to the above code describing what each step does in plain language.
+
+Then we can plot the results using ggplot.
 
 ```{r}
 env_rat %>%
@@ -242,6 +292,8 @@ plot_grid(dl_plot, ddl_plot)
 
 So here's the thing. There might be seasonal patterns, but they might be getting masked by the between depth variability. Lets look within a depth.
 
+What follows is essentially the steps I did above, but now I'm filtering to just 5m samples.
+
 ```{r}
 # extract data from one depth
 arisa_community_5m <- arisa_community2 %>% filter(depth_n == "5") %>% select(-depth_n)
@@ -269,6 +321,8 @@ env_rat_5m <- env00 %>%
   left_join(arisa_5m_robust_aitchinson_mds_scores, by = c("date_local"))
 ```
 
+And now I'm plotting the (color-coded) NMDS data.
+
 ```{r fig.width = 6, fig.height = 2}
 dl_plot_5m <- env_rat_5m %>%
   ggplot(aes(x = NMDS1,  y = NMDS2, col = day_length)) +
@@ -285,9 +339,13 @@ ddl_plot_5m <-  env_rat_5m %>%
 plot_grid(dl_plot_5m, ddl_plot_5m)
 ```
 
-**Question:** How is this nmds plot different from the one above. What useful things does it show that the last one doesn't?
+The plot above shows samples from just 5m, unlike the previous one that shows samples from all depths.
 
-Now if we want to do this for all of the other depths, we shouldn't just copy text down. Lets make the above work into a function.
+**Question:** What useful things does this "5m" plot show that the "all-samples" one doesn't?
+
+Now if we want to do this for all of the other depths, we shouldn't just copy text down. Lets turn the above work into a re-usable function. I'm going to call the function `distance_by_depth_calculator()` and its going to do the data wrangling as above, but let us specify a depth. Then it will return a plotable data frame.
+
+I'm also going to make `distance_by_depth_plotter` that takes a plotable dataframe made by `distance_by_depth_calculator` and plots it.
 
 ```{r}
 distance_by_depth_calculator <- function(target_depth_n){
@@ -350,8 +408,9 @@ distance_by_depth_everythinginator("150")
 **Question:** What does the `distance_by_depth_everythinginator()` function do?
 
 Once I have that function, I can use `map` to apply it to every depth.
+
 ```{r}
-#\ output: false
+#| output: false
 # one million hacker-points to anyone who can figure out why I can't prevent it from displaying the output with the above code.
 # https://quarto.org/docs/computations/execution-options.html
 depth_plots <- map(depths_in_order, distance_by_depth_everythinginator)
@@ -437,6 +496,7 @@ chem_5m_distance <- vegdist(chem_5m_scaled, method = "euclidian")
 chem_5m_mds <- metaMDS(chem_5m_distance) 
 plot(chem_5m_mds)
 ```
+
 Boy is that one strange looking outlier.
 
 ```{r}
@@ -460,21 +520,32 @@ chem_5m_rat %>%
   geom_point() +
   scale_color_viridis_d(name = "year")
 ```
+
 **Question:** When was the outlying data point collected? What does it mean that its outlying?
 
 That outlying point is going to screw up any sort of mantel test, so we'll use a non-parametric version.
 
 # Mantel test
-We're going to essentially see if the distance matrix arisa_5m_robust_aitchinson is correlated with chem_5m_distance
-First, distance matrices have to be in the same order to do the mantel test. Lets check
+
+We're going to essentially see if the distance matrix arisa_5m_robust_aitchinson is correlated with chem_5m_distance First, distance matrices have to be in the same order to do the mantel test. Lets check
 
 ```{r}
 tibble(labels(arisa_5m_robust_aitchinson),
 labels(chem_5m_distance))
 ```
+
 Looks good.
 
-Actual test
+First, lets lplot the community (robust-aitchinson) dissimilarities vs the chemistry (euclidian) dissimilarities.
+
+```{r}
+plot(arisa_5m_robust_aitchinson, chem_5m_distance)
+```
+
+**Question:** Do these data look nicely correlated with eachother?
+
+Actual test -- Just asks if the aitchinson distances are correlated with the chemistry distances.
+
 ```{r}
 mantel(arisa_5m_robust_aitchinson, chem_5m_distance, method = "spear")
 ```
@@ -498,6 +569,7 @@ time_distance <- vegdist(time_stuff, method = "euclid")
 ```
 
 Quick look at this new distance matrix
+
 ```{r}
 time_rat <- time_distance %>%
   metaMDS() %>%
@@ -524,19 +596,26 @@ time_rat %>%
 ```
 
 ```{r}
-mantel(arisa_5m_robust_aitchinson, time_distance)
+plot(arisa_5m_robust_aitchinson, time_distance)
 ```
 
-So the biology is very associated with time.
+Still kind of messy. But is it statistically significant.
 
 ```{r}
-mantel(chem_5m_distance, time_distance)
+mantel(arisa_5m_robust_aitchinson, time_distance, method = "spearman")
+```
+
+Apparently yes. The biology is very associated with time. Notice that the r value is around 12% which isn't a very strong correlation. Which is reflected in the the data looking not that correlated in the plot.
+
+Here I'm seeing if time is related to chemistry.
+
+```{r}
+mantel(chem_5m_distance, time_distance, method = "spearman")
 ```
 
 So is the chemistry!
 
-
-## What about the satelite data from Cram
+## What about the satelite data?
 
 ```{r}
 sat_5m <- env_5m %>%
@@ -574,20 +653,28 @@ sat_5m_rat %>%
   geom_point() +
   scale_color_viridis_d(name = "year")
 ```
+
 One thing I don't like is that I'm copying text a lot. I should make things into a function and not have to re-do so much coding. But I'm running out of time and intellectual band-width so this file is going to be a thousand lines long. Thanks for your patience.
 
+```{r}
+plot(arisa_5m_robust_aitchinson, sat_5m_distance)
+```
+
+If you look really hard at these data, they look kind of associated. And also kind of like a cumulonimbus cloud.
+
+A note on hard to see correlations: https://xkcd.com/1725/
 
 ```{r}
 mantel(arisa_5m_robust_aitchinson, sat_5m_distance, method = "spearman")
 ```
 
-**Question** Which are more closely related to microbial community structure, the satellite measurments, or the chemistry ones?
+**Question** Which are more closely related to microbial community structure, the satellite measurements, or the chemistry ones?
 
-*Task:*
-What if we did this for just one satellite measurement. Pick one and make a distance matrix of just that one variable. Compare it to the `arisa_5m_robust_aitchinson` distance matrix.
+*Task:* What if we did this for just one satellite measurement. Pick one and make a distance matrix of just that one variable. Compare it to the `arisa_5m_robust_aitchinson` distance matrix.
 
 # Partial mantel test
-Ok so the last thing are partial mantel tests. In which case we can see if a distance matrix is related to another, factoring out a third.
+
+Ok, so the last thing are partial mantel tests. In which case we can see if a distance matrix is related to another, factoring out a third.
 
 ```{r}
 mantel.partial(arisa_5m_robust_aitchinson, sat_5m_distance, time_distance, method = "spearman")

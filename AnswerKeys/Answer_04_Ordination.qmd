@@ -1,0 +1,93 @@
+---
+title: "Cram's Answer to Ordination Problem"
+author: "Jacob Cram"
+format: html
+---
+
+
+## Cram's answer
+
+Subset the data
+```{r}
+env_150m <- subset_env_by_depth("150")
+bio_150m <- subset_arisa_by_depth("150")
+```
+
+
+Are the elements in the same order in both data frames?
+```{r}
+rownames(bio_150m) ==  env_150m$date_local
+```
+
+CLR transform
+```{r}
+bio_clr_150m <- decostand(bio_150m, method = "clr", pseudocount = smz_arisa)
+```
+
+
+The model
+
+```{r}
+rda_eg <- rda(bio_clr_150m ~ temp + sal, data = env_150m)
+```
+
+```{r}
+plot(rda_eg)
+```
+
+```{r}
+anova(rda_eg, by = "margin")
+```
+
+```{r}
+site_scores_eg <- scores(rda_eg, display = "sites", choices = c(1,2,3))
+species_scores_eg <- scores(rda_eg, display = "species", choices = c(1,2,3))
+biplot_scores_eg <- scores(rda_eg, display = "bp", choices = c(1,2,3))
+
+make_site_df<- function(rdaIn, envDf){
+  arisa_robust_aitchinson_rda_eg_scores <- scores(rdaIn, display = "sites", choices = c(1,2,3)) %>%
+  as.data.frame() %>%
+  rownames_to_column("date_local") %>%
+  #separate(SampleID, into = c("date_local", "depth_n"), sep = "_") %>%
+  #mutate(date_local = as.Date(date_local)) %>%
+  identity()
+  
+  env_rda <- env00 %>%
+  left_join(arisa_robust_aitchinson_rda_scores, by = c("date_local", "depth_n")) %>%
+  mutate(depth_n = factor(depth_n, levels = depths_in_order)) # I'm making depth_n a factor so its in order
+  
+  env_rda # I'm not sure why this isn't returning to the terminl
+}
+
+make_tax_df <- function(rdaIn, envDf){
+  species_scores_eg <- scores(rdaIn, display = "species", choices = c(1,2,3))
+  species_df_rda <- species_scores_rda %>% as.data.frame() %>% rownames_to_column("ARISA_Fragment_ID")
+  rda_tax <- species_df_rda %>%
+  left_join(tax00_surface, by = c("ARISA_Fragment_ID" = "arisa_frag"))
+  
+  rda_tax
+}
+
+make_tax_df(rda_eg, tax00_surface)
+
+
+make_site_df(rda_eg, env03_imputed)
+
+env_biplot_df <- as.data.frame(biplot_scores_rda) %>% rownames_to_column("Variable")
+
+arisa_robust_aitchinson_rda_eg_scores <- site_scores_eg %>%
+  as.data.frame() %>%
+  rownames_to_column("SampleID") %>%
+  separate(SampleID, into = c("date_local", "depth_n"), sep = "_") %>%
+  mutate(date_local = as.Date(date_local)) %>%
+  identity()
+
+env_rda <- env00 %>%
+  left_join(arisa_robust_aitchinson_rda_scores, by = c("date_local", "depth_n")) %>%
+  mutate(depth_n = factor(depth_n, levels = depths_in_order)) # I'm making depth_n a factor so its in order
+
+species_df_rda <- species_scores_rda %>% as.data.frame() %>% rownames_to_column("ARISA_Fragment_ID")
+rda_tax <- species_df_rda %>%
+  left_join(tax00_surface, by = c("ARISA_Fragment_ID" = "arisa_frag"))
+```
+

@@ -1,0 +1,398 @@
+---
+title: "Ordination"
+author: "Jacob Cram"
+format: html
+---
+
+# Preamble
+Recall that in the last lesson, we explored dissimilarities between different samples We could compute dissimilarity matrices, and then plot those dissimilarities using non-metric multidimensional scaling with `vegan::metaMDS`. Principal components analysis (PCA) is another way to look at dissimilarities between samples. 
+* **A limitation** of PCA is that it effectively only operates on euclidean distances (so you can't do a Bray-Curtis PCA); of course, the euclidian distance of CLR transformed data is the Atchinson distance, so we have that option too.
+* **Advantages of PCA over NMDS:** 
+   * In PCA we can look also at the variables that define the similarity (eg the species or other taxonomic groups).
+   * PCA can be extended to redundancy analysis (RDA) in which we can see how environmental variables relate to community structure data.
+
+Probably the best option is to start with some examples.
+
+# Loading in Data
+
+Instead of loading all of my data and libraries here and dedicating the first half of this exercise to data wrangling, I can hide a bunch of that work on another script and then call that script.
+
+```{r}
+#| include: FALSE
+source(here::here("Ordination_Pre_Work.R"))
+```
+
+The `#| include: FALSE` thing tells quarto not to dump all fo the output of `Ordination_Pre_Work.R` into the notebook. 
+**Task:** Try removing that line and see what happens.
+
+# Principal Components Analysis
+
+The input to PCA is a community data matrix. Also allowed are data frames with column names.
+the function `rda` allows us to put in community data, but also environmental data. In the case of running regualar PCA, we just leave out the environmental data.  
+
+First lets CLR transform the community data
+
+In the regression lesson, we did this by hand, but vegan has some built in tools. You can't do a CLR transform on zeros, so lets add an adjustment factor. My preference is usually to add the smallest non-zero value observed to everything.
+
+```{r}
+# Here's a function to use the smallest non zero value
+smallest_non_zero <- function(vec){
+  # start with a vecotr named `vec`
+  # This is only going to work if there are no negative values, so lets test for that
+  if(min(vec)<0) stop("This function can't handle negative numbers, but vec has at least one negative")
+  # first, just take the elements that aren't zero
+  all_non_zeros <- vec[which(vec > 0)]
+  smz <- min(all_non_zeros)
+  smz
+}
+
+# test our function
+
+testData <- c(0, 1, 5, 3, 1, 0, 2)
+smallest_non_zero(testData)
+```
+
+**Task:** Make sure that the `smallest_non_zero` function fails correctly if there is a negative number in the test data.
+
+Now with our function, we can run it on every cell of the matrix.
+Originally I was going to run it on every column and then take the minimum of that, but I think R can also just run it on all of the data in the matrix.
+```{r}
+smz_arisa <- smallest_non_zero(arisa_community_mtx)
+smz_arisa
+```
+
+Now that we have this smallest non zero number, we can do the CLR transform, adding that number to every cell.
+```{r}
+arisa_community_clr <- decostand(arisa_community_mtx, method = "clr", pseudocount = smz_arisa)
+```
+
+**Question:** Look at `arisa_community_mtx` and `arisa_community_clr`. How do they look different from each other?
+
+**Question:** What happens if you don't specify the pseudocount and try to run the above function?
+
+
+```{r}
+pca_mod <- rda(arisa_community_clr)
+```
+
+```{r}
+plot(pca_mod)
+```
+
+So in the above figure, the circles are samples, and the `+` signs are the different OTUs. The positions of the figures should look kind of familiar. They are similar (though not identical to) `plot(arisa_robust_aitchinson_mds)` from the `03_Similarity.qmd` exercise.
+
+**Task:** Do a PCA of the non CLR transformed data. How does it look different from the figure I made with CLR transformed data?
+
+# Other dimensions.
+One thing about PCA data is that it is actually in a multidensional space. There are in fact as as many dimensions as there are axes.
+
+```{r}
+Variance_df <- enframe(eigenvals(pca_mod)/sum(eigenvals(pca_mod)), value = "Variance_Explained", name = "Component") %>%
+  mutate(PC = row_number())
+Variance_df %>%
+  ggplot(aes(x =PC, y = Variance_Explained)) +
+  geom_point()
+```
+
+```{r}
+Variance_df %>%
+  ggplot(aes(x =PC, y = Variance_Explained)) +
+  geom_point() +
+  scale_x_continuous(breaks = 1:10, limits = c(1, 10)) +
+  labs(y = "% Variance Explained", x = "Principal Component") +
+  theme_bw()
+```
+```{r}
+Variance_df[1:5,]
+```
+
+So the first axis (PC1) explains about 24% of the data. The second one about 5% of the data. The third about 4% of the data and so on. We can look at variability in the third dimension too if we want.
+
+```{r}
+plot(pca_mod, choices = c(1,3))
+```
+Which isn't that informative yet. Lets get a better idea of what the points represent.
+
+
+# Color coding PCA data.
+As for the NMDS analysis, we can extract the positions of the points.
+
+```{r}
+site_scores <- scores(pca_mod, display = "sites", choices = c(1,2,3))
+species_scores <- scores(pca_mod, display = "species", choices = c(1,2,3))
+```
+
+Append the site stores to the environmental data matrix
+```{r}
+arisa_robust_aitchinson_pca_scores <- site_scores %>%
+  as.data.frame() %>%
+  rownames_to_column("SampleID") %>%
+  separate(SampleID, into = c("date_local", "depth_n"), sep = "_") %>%
+  mutate(date_local = as.Date(date_local)) %>%
+  identity()
+
+depths_in_order <- c("5", "CMAX", "150", "500", "890")
+
+env_pc <- env00 %>%
+  left_join(arisa_robust_aitchinson_pca_scores, by = c("date_local", "depth_n")) %>%
+  mutate(depth_n = factor(depth_n, levels = depths_in_order)) # I'm making depth_n a factor so its in order
+```
+
+```{r}
+env_pc %>%
+  ggplot(aes(x = PC1, y = PC2, col = depth_n)) + 
+  geom_point() +
+  scale_color_manual(values = c("red", "green", "grey", "blue", "black")) +
+  theme_bw()
+```
+So again we see that things group by depth.
+
+**Question:** How do these patterns look similar or different to the ones generated by metaMDS in the `02_Similarity.qmd` excercise?
+
+Next, we can add the species back in.
+
+```{r}
+species_df <- species_scores %>% as.data.frame() %>% rownames_to_column("ARISA_Fragment_ID")
+
+env_pc %>%
+  ggplot(aes(x = PC1, y = PC2, col = depth_n)) + 
+  geom_point() +
+  geom_point(col = "red", shape = 3, data = species_df) + # This is the new line. Includes the species data.
+  scale_color_manual(values = c("red", "green", "grey", "blue", "black")) +
+  theme_bw()
+```
+
+**Task:** Create another plot, like the one above, but this time have *PC1* on the x-axis and *PC3* on the y axis.
+**Question:** What can you say about variance along *PC3*?
+
+# Thinking about species
+Gosh these species data points are un-informative. And there are a lot of them. 
+One thing that helps is binding the species scores with the taxonomy data to color code by phylum.
+
+```{r}
+pc_tax <- species_df %>%
+  left_join(tax00_surface, by = c("ARISA_Fragment_ID" = "arisa_frag"))
+```
+
+```{r}
+env_pc %>%
+  ggplot(aes(x = PC1, y = PC2, fill = depth_n)) + 
+  geom_point(shape = 21) +
+  geom_point(aes(col = Phylum, shape = Phylum), fill = "black", data = pc_tax) + # This is the new line. Includes the species data.
+  scale_fill_manual(values = c("red", "green", "grey", "blue", "black")) +
+  scale_shape_manual(values = 3:14) +
+  theme_bw()
+```
+I can also just take the things that are farthest from the origin. In which case, I can often provide additional information about thoe points.
+
+```{r}
+pct_variance_explained_by_pc1 <- Variance_df[1,]$Variance_Explained
+pct_variance_explained_by_pc2 <- Variance_df[2,]$Variance_Explained
+
+pc_tax01 <- pc_tax %>%
+  mutate(dist = sqrt(PC1^2 + PC2^2), .before = "Domain")  %>%
+  mutate(dist2 = sqrt((PC1 * pct_variance_explained_by_pc1)^2 + (PC2 * pct_variance_explained_by_pc2)^2), .before = "Domain") %>%
+  arrange(-dist)
+pc_tax_far_out <- pc_tax01 %>%
+  head(5)
+```
+
+```{r}
+env_pc %>%
+  ggplot(aes(x = PC1, y = PC2)) + 
+  geom_point(shape = 21, aes(fill = depth_n)) +
+  geom_text(aes(col = Phylum, label = ARISA_Fragment_ID), fill = "black", data = pc_tax_far_out) + # This is the new line. Includes the species data.
+  scale_fill_manual(values = c("red", "green", "grey", "blue", "black")) +
+  scale_shape_manual(values = 3:14) +
+  theme_bw()
+```
+Of course, more informative names that contsin some information about taxonomy would likely be better. 
+
+**Question:** Why do you think I often focus on the species/OTUs that are farthest from the origin?
+
+## Things one could also do.
+Recall all of the sub-setting by depth and color coding by temporal differences and the like we did in `03_Similarity.qmd`. That can all be done here too.
+
+One could also group to different taxonomic levels, and then instead of showing ARISA fragments, we could show the how say different phyla relate to differences between sites.
+
+
+# Biplots
+
+Ok, so we've seen sample scores and organism scores and how they relate to each other.
+Sometimes we also want to see how these things relate to some environmental variable or variables. Lets try relating them to depth.
+
+```{r}
+env03 %>% group_by(depth_n) %>%
+  summarise(depth = median(na.omit(depth)))
+```
+
+```{r}
+# https://www.codingprof.com/3-ways-to-replace-missing-values-with-the-median-per-group-in-r/
+env03_imputed_0 <- env03 %>% 
+  group_by(depth_n) %>%
+  mutate(depth = ifelse(is.na(depth),
+                        median(depth, na.rm = TRUE),
+                        depth
+                        )) %>%
+  ungroup()
+```
+
+Actually, we could impute every numeric column while we are at it
+```{r}
+env03_imputed <- env03 %>% 
+  group_by(depth_n) %>%
+  mutate_if(is.numeric, ~ifelse(is.na(.),
+                        median(., na.rm = TRUE),
+                        .
+                        )) %>%
+  ungroup()
+```
+
+**Question:** Why am I imputing the data?
+
+The easiest way to specify rda biplots is as a formula.
+
+Now we have a model where the data are "constrained" by the depth parameter.
+
+```{r}
+rda_mod <- rda(arisa_community_clr ~ depth, data = env03_imputed)
+```
+
+**Question:** The formula where Y~variable1 + variable2 is one way of specifying an RDA. Look at the RDA documentation. What is the other way?
+
+Notice that rda_mod has both one RDA axis -- data constrained by depth. And a bunch of PC axes (the unconstrained variance)
+```{r}
+eigenvals(rda_mod)[1:10]
+```
+
+
+```{r}
+Variance_df <- enframe(eigenvals(rda_mod)/sum(eigenvals(rda_mod)), value = "Variance_Explained", name = "Component") %>%
+  mutate(Component_Number = parse_number(Component)) %>%
+  mutate(Component_Type = str_remove(Component, "\\d+")) %>%
+  mutate(Component_ID = row_number())
+Variance_df
+         
+Variance_df %>%
+  ggplot(aes(x =Component_ID, y = Variance_Explained, col = Component_Type)) +
+  geom_point() +
+  scale_x_continuous(breaks = 1:10, labels = Variance_df$Component[1:10], limits = c(1, 10)) +
+  labs(y = "% Variance Explained", x = "Principal Component") +
+  theme_bw()
+```
+**Question:** How much variance is explained by Depth.
+
+We can also do statistical significance tests to ask things like. Is depth statistically significantly related to the community structure.
+```{r}
+anova(rda_mod, by = "margin")
+```
+
+You can see here that not only is depth statistically significant, it has a variance of 42. 
+There is residual variance (variance of everything else) of 339.5
+
+**Question:** What fraction of the total variance is explained by `depth`.
+
+The simplest way to plot an RDA is with the built in plotting function.
+
+```{r}
+plot(rda_mod)
+```
+Because we only have one environmental variable, it always goes straight off to the right.
+Orthogonal to that is PC1, which represents most of the variability not explained by depth.
+
+**Task:** We can treat depth as a non-linear predictor as follows: 
+```{r}
+rda_mod_sq <- rda(arisa_community_clr ~ depth + I(depth^2), data = env03_imputed)
+```
+Are both depth and depth^2 statistically significant predictors of community structure?
+How does that plot look? What are we seeing on the Y axis instead of PC1. 
+Can you make a plot that shows RDA1 vs PC1 for this new model?
+What does it mean that both depth and depth^2 are statistically significant variables?
+Why do I have to specify depth^2 surrounded by the `I()` function?
+
+## Prettier
+
+Data wrangling
+```{r}
+# as before
+site_scores_rda <- scores(rda_mod, display = "sites", choices = c(1,2,3))
+species_scores_rda <- scores(rda_mod, display = "species", choices = c(1,2,3))
+
+# also we can extract the scores of the environmental variable -- or variables if we had more than one.
+biplot_scores_rda <- scores(rda_mod, display = "bp", choices = c(1,2,3))
+
+env_biplot_df <- as.data.frame(biplot_scores_rda) %>% rownames_to_column("Variable")
+
+arisa_robust_aitchinson_rda_scores <- site_scores_rda %>%
+  as.data.frame() %>%
+  rownames_to_column("SampleID") %>%
+  separate(SampleID, into = c("date_local", "depth_n"), sep = "_") %>%
+  mutate(date_local = as.Date(date_local)) %>%
+  identity()
+
+env_rda <- env00 %>%
+  left_join(arisa_robust_aitchinson_rda_scores, by = c("date_local", "depth_n")) %>%
+  mutate(depth_n = factor(depth_n, levels = depths_in_order)) # I'm making depth_n a factor so its in order
+
+species_df_rda <- species_scores_rda %>% as.data.frame() %>% rownames_to_column("ARISA_Fragment_ID")
+rda_tax <- species_df_rda %>%
+  left_join(tax00_surface, by = c("ARISA_Fragment_ID" = "arisa_frag"))
+```
+
+```{r}
+env_rda %>%
+  ggplot(aes(x = RDA1, y = PC1)) + 
+  # Plot site variables
+  geom_point(shape = 21, aes(fill = depth_n)) +
+  # Plot OTU Variables
+  geom_point(aes(col = Phylum, shape = Phylum), fill = "black", data = rda_tax) + # This is the new line. Includes the species data.
+  # Plot Environmental Predictors
+  # The length of the biplot arrows doesn't matter/are relative to eachother, thats why I can get away with multiplying them by coefficients.
+  # So in this case I double the length of the arrow.
+  geom_segment(aes(x = 0, y = 0, xend = RDA1 * 2, yend = PC1 * 2), color = "red", arrow = arrow(), data = env_biplot_df) +
+  # Add a label so we remember which arrow goes with which thing.
+  geom_label(aes(label = Variable), data = env_biplot_df) +
+  scale_fill_manual(values = c("red", "green", "grey", "blue", "black")) +
+  scale_shape_manual(values = 3:14) +
+  theme_bw()
+```
+
+**Task:** Please write a figure caption for the above plot.
+
+**Large Task:** 
+*  Pick a depth_n category. Pick between 2 and 5 environmental variables. 
+*  Subset the ARISA data and the environmental data to just the depth you want (see `## Some useful tools`) (make sure the rows are in the same order for each)
+*  CLR transform the ARISA data.
+*  Run an rda model, seeing how the community structure relates to your 2-5 environmental variables.
+*  Run an anova on your model, testing whether each variable is statistically significantly related to community structure.
+*  Plot your model using R's default plot function.
+*  Extract the scores form the model and generate a nicer looking figure.
+*  Provide a caption and a written interpretation (like you would find in a methods section) of your figure.
+*  If time permits, please have a representative share your results with the class.
+
+## Some useful tools
+These subset the ARISA data and the environmental data so you don't have to do so.
+
+```{r}
+subset_arisa_by_depth<- function(target_depth_n){
+  ac3 <- arisa_community2 %>% filter(depth_n == target_depth_n) %>% select(-depth_n)
+  # ac <- ac %>% rename(sampleID = date_local)
+  
+  ac4 <- ac3 %>% as.data.frame() %>% column_to_rownames("date_local")
+  
+  ac4
+}
+
+# test
+test_subset_arisa <- subset_arisa_by_depth("5")
+
+subset_env_by_depth <- function(target_depth_n){
+  es0 <- env03_imputed %>% filter(depth_n == target_depth_n)
+  es0
+}
+
+test_subset_env <- subset_env_by_depth("5")
+```
+
+
+

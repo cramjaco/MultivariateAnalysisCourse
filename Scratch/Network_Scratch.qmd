@@ -1,0 +1,36 @@
+---
+title: "Network Scratch Work"
+author: "Jacob Cram"
+format: html
+---
+
+Stuff I'm pulling out of `05_Networks.qmd` that I don't really want to delete.
+
+## Selecting rows and columns with base R
+
+So the simplest network can just summarise the correlations between all pairs of variables
+```{r}
+# # this step is slow... too slow.
+# pt0 <- proc.time()
+# spearCorTest <- corr.test(arisa_community_clr, method = "spearman", adjust = "none")
+# pt1 <- proc.time
+# pt1 - pt0
+# # extract the correlation r values
+# # spearCor <- spearCorTest$r
+# # # extract the p-values
+# # spearP <- spearCorTest$p
+```
+Just 5m samples
+```{r}
+x5m_rows <- str_detect(rownames(arisa_community_mtx), "_5$")
+arisa_community_mtx_5m <- arisa_community_mtx[x5m_rows,]
+```
+
+Sometimes base r has functions that are useful.
+There is a tidy way to do this, but this isn't it. I'm subsetting the matrix to something smaller.
+```{r}
+# Fraction of the time each thing is > 10
+frac_present <- apply(arisa_community_mtx_5m, 2, function(x){sum(x>0)})/dim(arisa_community_mtx_5m)[1]
+more_than_ten_percent <- frac_present > .1
+arisa_community_mtx_5m_tenpct <- arisa_community_mtx_5m[,more_than_ten_percent]
+```

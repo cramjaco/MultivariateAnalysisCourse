@@ -29,7 +29,7 @@ rownames(arisa_community_4) <- arisa_community3$sampleID
 
 arisa_community_mtx <- arisa_community_4 %>% # throw away the column with the sampleIDs
   as.matrix() # turn into matrix
-#rownames(arisa_community_mtx) <- arisa_community3$sampleID # use the sampleID column as names
+#rownames(arisa_community_mtx) <- arisa_community3$sampleID # urse the sampleID column as names
 
 ## Environmental Data
 
